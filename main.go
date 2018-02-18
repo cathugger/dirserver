@@ -68,6 +68,8 @@ var (
 	thead    *ft.Template
 	tlist    *ft.Template
 	ttail    *ft.Template
+	dirlock  sync.Mutex
+	startdir int32
 )
 
 func escapeURLPath(s string) string {
@@ -694,6 +696,10 @@ func addWatch(h int32) (int32, error) {
 	if h == -1 {
 		panic("handle cannot be negative")
 	}
+
+	dirlock.Lock()
+	defer dirlock.Unlock()
+
 	errno := unix.Fchdir(int(h))
 	if errno != nil {
 		return -1, fmt.Errorf("failed to chdir: %v\n", os.NewSyscallError("fchdir", errno))
@@ -920,10 +926,17 @@ func scanDir(n *fsnode) {
 }
 
 func loadTemplates() error {
+	dirlock.Lock()
+	errno := unix.Fchdir(int(startdir))
+	if errno != nil {
+		dirlock.Unlock()
+		return fmt.Errorf("failed to chdir: %v\n", os.NewSyscallError("fchdir", errno))
+	}
 	fs, err := loadAllToStrs(tmpldir, "head.tmpl", "list.tmpl", "tail.tmpl")
 	if err != nil {
 		return fmt.Errorf("error reading tamplates: %v", err)
 	}
+	dirlock.Unlock()
 
 	th, err := ft.NewTemplate(fs[0], "{{", "}}")
 	if err != nil {
@@ -963,6 +976,13 @@ func main() {
 		return
 	}
 
+	sdir, errno := unix.Open(".", unix.O_RDONLY|unix.O_PATH, 0)
+	startdir = int32(sdir)
+	if sdir == -1 {
+		fmt.Fprintf(os.Stderr, "warning: error opening startup dir: %v\n",
+			os.NewSyscallError("open", errno))
+	}
+
 	if err := loadTemplates(); err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		return
@@ -991,7 +1011,8 @@ func main() {
 
 	dh, errno := unix.Open(servedir, unix.O_RDONLY|unix.O_PATH, 0)
 	if dh == -1 {
-		fmt.Fprintf(os.Stderr, "error opening watch dir: %v\n", errno)
+		fmt.Fprintf(os.Stderr, "error opening watch dir: %v\n",
+			os.NewSyscallError("open", errno))
 		return
 	}
 	wd, e := addWatch(int32(dh))
