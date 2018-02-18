@@ -20,10 +20,10 @@ import (
 	"sync"
 	"text/template"
 	//"path/filepath"
-	"sort"
-	"unsafe"
-	"time"
 	"bytes"
+	"sort"
+	"time"
+	"unsafe"
 )
 
 type fsnode struct {
@@ -181,10 +181,9 @@ var (
 	notyfyMapLock sync.RWMutex
 )
 
-
 type Event struct {
 	name []byte
-	raw unix.InotifyEvent
+	raw  unix.InotifyEvent
 }
 
 var watchToNode = make(map[int32]*fsnode)
@@ -225,29 +224,29 @@ func eventProcessor(ch <-chan Event) {
 				moveCookie = 0
 			}
 		}
-		if ev.raw.Mask & unix.IN_Q_OVERFLOW != 0 {
+		if ev.raw.Mask&unix.IN_Q_OVERFLOW != 0 {
 			killmovenode()
 			// event queue overflowed. warn. assume we're in inconsistent state
 			fmt.Fprintf(os.Stderr, "inotify queue overflowed\n")
 			continue
 		}
-		dir := ev.raw.Mask & unix.IN_ISDIR != 0
+		dir := ev.raw.Mask&unix.IN_ISDIR != 0
 		n, oknode = watchToNode[ev.raw.Wd]
 		if !oknode {
 			killmovenode()
 			fmt.Fprintf(os.Stderr, "received event on unknown watch descriptor %d, name(%q), dir(%t), mask(0x%08X)\n",
 				ev.raw.Wd, ev.name, dir, ev.raw.Mask)
-			
+
 			// we wouldn't know what to do with it
 			continue
 		}
 		n.lock.Lock()
-		
+
 		if n.wd != ev.raw.Wd {
 			panic("wrong wd mapping")
 		}
-		
-		if ev.raw.Mask & unix.IN_IGNORED != 0 {
+
+		if ev.raw.Mask&unix.IN_IGNORED != 0 {
 			killmovenode()
 			fmt.Fprintf(os.Stderr, "dbg: ignore event, name(%s), wd(%d)\n", ev.name, ev.raw.Wd)
 			// watch was removed
@@ -260,7 +259,7 @@ func eventProcessor(ch <-chan Event) {
 			fmt.Fprintf(os.Stderr, "dbg: event on dead or non-dir node, name(%s)\n", ev.name)
 			continue
 		}
-		
+
 		handlecreate := func() {
 			namesl := append(ev.name, '/')
 			old := n.chmap[string(ev.name)]
@@ -317,7 +316,7 @@ func eventProcessor(ch <-chan Event) {
 				if wd == -1 {
 					fmt.Fprintf(os.Stderr, "bogus, error trying to add watch for %q: %v\n", ev.name, err)
 				}
-				
+
 				if old != nil {
 					if old.fh == -1 {
 						// old was file. rid of it
@@ -337,7 +336,7 @@ func eventProcessor(ch <-chan Event) {
 						}
 					}
 				}
-				
+
 				var nn *fsnode
 				if wd != -1 {
 					nn = watchToNode[wd]
@@ -349,9 +348,9 @@ func eventProcessor(ch <-chan Event) {
 				}
 				if nn == nil {
 					nn = &fsnode{
-						upd: time.Time{}, // XXX
-						fh: int32(oh),
-						wd: wd,
+						upd:   time.Time{}, // XXX
+						fh:    int32(oh),
+						wd:    wd,
 						chmap: make(map[string]*fsnode),
 						papas: []*fsnode{n},
 					}
@@ -361,12 +360,12 @@ func eventProcessor(ch <-chan Event) {
 					}
 				}
 				n.chlist = append(n.chlist, fsnamed{
-					name: namesl,
+					name:  namesl,
 					lname: []byte((&url.URL{Path: string(namesl)}).EscapedPath()),
-					node: nn,
+					node:  nn,
 				})
 				n.chmap[string(ev.name)] = nn
-				
+
 				sortNode(n)
 			} else {
 				unix.Close(oh) // non-dirs dont need it
@@ -386,15 +385,15 @@ func eventProcessor(ch <-chan Event) {
 						}
 					}
 					nn := &fsnode{
-						upd: time.Time{}, // XXX
-						fh: -1,
-						wd: -1,
+						upd:   time.Time{}, // XXX
+						fh:    -1,
+						wd:    -1,
 						papas: []*fsnode{n},
 					}
 					n.chlist = append(n.chlist, fsnamed{
-						name: ev.name,
+						name:  ev.name,
 						lname: []byte((&url.URL{Path: string(ev.name)}).EscapedPath()),
-						node: nn,
+						node:  nn,
 					})
 					n.chmap[string(ev.name)] = nn
 					sortNode(n)
@@ -408,7 +407,7 @@ func eventProcessor(ch <-chan Event) {
 			}
 			return
 		}
-		if ev.raw.Mask & unix.IN_MOVED_TO != 0 {
+		if ev.raw.Mask&unix.IN_MOVED_TO != 0 {
 			// file/dir was moved to
 			fmt.Fprintf(os.Stderr, "dbg: moved to, name(%s), dir(%t), cookie(%d)\n", ev.name, dir, ev.raw.Cookie)
 			if movenode != nil {
@@ -426,9 +425,9 @@ func eventProcessor(ch <-chan Event) {
 						nam = append(ev.name, '/')
 					}
 					n.chlist = append(n.chlist, fsnamed{
-						name: nam,
+						name:  nam,
 						lname: []byte((&url.URL{Path: string(nam)}).EscapedPath()),
-						node: movenode,
+						node:  movenode,
 					})
 					n.chmap[string(ev.name)] = movenode
 					movenode = nil
@@ -441,7 +440,7 @@ func eventProcessor(ch <-chan Event) {
 			continue
 		}
 		killmovenode()
-		if ev.raw.Mask & unix.IN_CREATE != 0 {
+		if ev.raw.Mask&unix.IN_CREATE != 0 {
 			// file/dir was made
 			fmt.Fprintf(os.Stderr, "dbg: create event, name(%s), dir(%t)\n", ev.name, dir)
 			handlecreate()
@@ -476,13 +475,13 @@ func eventProcessor(ch <-chan Event) {
 				killNode(old)
 			}
 		}
-		if ev.raw.Mask & unix.IN_DELETE != 0 {
+		if ev.raw.Mask&unix.IN_DELETE != 0 {
 			// file/dir was deleted
 			fmt.Fprintf(os.Stderr, "dbg: delete event, name(%s), dir(%t)\n", ev.name, dir)
 			handledelete()
 			continue
 		}
-		if ev.raw.Mask & unix.IN_MOVED_FROM != 0 {
+		if ev.raw.Mask&unix.IN_MOVED_FROM != 0 {
 			// file/dir was moved from
 			fmt.Fprintf(os.Stderr, "dbg: moved from, name(%s), dir(%t), cookie(%d)\n", ev.name, dir, ev.raw.Cookie)
 			old, ok := n.chmap[string(ev.name)]
@@ -529,13 +528,13 @@ func newWatcher() (*watcher, error) {
 	if fd == -1 {
 		return nil, os.NewSyscallError("inotify_init1", errno)
 	}
-	
+
 	plr, err := newFDPoller(int32(fd))
 	if err != nil {
 		unix.Close(fd)
 		return nil, fmt.Errorf("newFDPoller failed: %v", err)
 	}
-	
+
 	w := &watcher{
 		ifd: int32(fd),
 		plr: plr,
@@ -546,7 +545,7 @@ func newWatcher() (*watcher, error) {
 // channel write should not block
 func (w *watcher) watch(ch chan<- Event) {
 	var (
-		buf [unix.SizeofInotifyEvent * 4096]byte // Buffer for a maximum of 4096 raw events
+		buf   [unix.SizeofInotifyEvent * 4096]byte // Buffer for a maximum of 4096 raw events
 		ok    bool
 		errno error
 		n     int
@@ -560,7 +559,7 @@ func (w *watcher) watch(ch chan<- Event) {
 	// 5. sort current node's children
 	// 6. unlock current node (or all tree)
 	// 7. if not async, process inotify events
-	
+
 	// there can be race when renaming directories
 	// 1. add big directory xxx/yyy/zzz
 	// 2. add directory xxx/yyy/eee
@@ -673,7 +672,7 @@ func killNode(n *fsnode) {
 func scanDir(n *fsnode) {
 	n.lock.Lock()
 	defer n.lock.Unlock()
-	
+
 	var err error
 
 	if n.fh == -1 {
@@ -681,7 +680,7 @@ func scanDir(n *fsnode) {
 		return
 	}
 	// reuse its handle to open dir reading handle
-	dh, errno := unix.Openat(int(n.fh), ".", unix.O_RDONLY | unix.O_DIRECTORY, 0)
+	dh, errno := unix.Openat(int(n.fh), ".", unix.O_RDONLY|unix.O_DIRECTORY, 0)
 	if dh == -1 {
 		fmt.Fprintf(os.Stderr, "failed to open dir for listing, err: %v\n", os.NewSyscallError("openat", errno))
 		return
@@ -726,7 +725,7 @@ func scanDir(n *fsnode) {
 			killNode(old)
 		}
 		fmt.Fprintf(os.Stderr, "dbg: discovered file %q\n", fn)
-		fh, errno := unix.Openat(int(n.fh), fn, unix.O_RDONLY | unix.O_PATH, 0) // follow symlinks
+		fh, errno := unix.Openat(int(n.fh), fn, unix.O_RDONLY|unix.O_PATH, 0) // follow symlinks
 		if fh == -1 {
 			fmt.Fprintf(os.Stderr, "failed to open child dir %q, err: %v\n", fn, os.NewSyscallError("openat", errno))
 			if old != nil {
@@ -761,18 +760,18 @@ func scanDir(n *fsnode) {
 				}
 			}
 			nn := &fsnode{
-				upd: time.Time{}, // XXX
-				fh: -1,
-				wd: -1,
+				upd:   time.Time{}, // XXX
+				fh:    -1,
+				wd:    -1,
 				papas: []*fsnode{n},
 			}
 			n.chlist = append(n.chlist, fsnamed{
-				name: []byte(fn),
+				name:  []byte(fn),
 				lname: []byte((&url.URL{Path: fn}).EscapedPath()),
-				node: nn,
+				node:  nn,
 			})
 			n.chmap[fn] = nn
-			
+
 			continue
 		} else if ft == unix.S_IFDIR {
 			fmt.Fprintf(os.Stderr, "%q is directory\n", fn)
@@ -803,9 +802,7 @@ func scanDir(n *fsnode) {
 					}
 				}
 			}
-			
-			
-			
+
 			var nn *fsnode
 			if wd != -1 {
 				nn = watchToNode[wd]
@@ -817,9 +814,9 @@ func scanDir(n *fsnode) {
 			}
 			if nn == nil {
 				nn = &fsnode{
-					upd: time.Time{}, // XXX
-					fh: int32(fh),
-					wd: wd,
+					upd:   time.Time{}, // XXX
+					fh:    int32(fh),
+					wd:    wd,
 					chmap: make(map[string]*fsnode),
 					papas: []*fsnode{n},
 				}
@@ -829,12 +826,12 @@ func scanDir(n *fsnode) {
 				}
 			}
 			n.chlist = append(n.chlist, fsnamed{
-				name: []byte(namesl),
+				name:  []byte(namesl),
 				lname: []byte((&url.URL{Path: namesl}).EscapedPath()),
-				node: nn,
+				node:  nn,
 			})
 			n.chmap[fn] = nn
-			
+
 			continue
 		} else if ft == unix.S_IFLNK {
 			fmt.Fprintf(os.Stderr, "%q is link(0x%04X)\n", fn, ft)
@@ -884,8 +881,8 @@ func main() {
 	}
 	gwatcher = w
 	ch := make(chan Event, 1024)
-	
-	dh, errno := unix.Open(servedir, unix.O_RDONLY | unix.O_DIRECTORY | unix.O_PATH, 0)
+
+	dh, errno := unix.Open(servedir, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_PATH, 0)
 	if dh == -1 {
 		fmt.Fprintf(os.Stderr, "error opening watch dir: %v\n", errno)
 		return
@@ -896,14 +893,14 @@ func main() {
 		return
 	}
 	rootnode = &fsnode{
-		fh: int32(dh),
-		wd: wd,
+		fh:    int32(dh),
+		wd:    wd,
 		chmap: make(map[string]*fsnode),
 	}
 	watchToNode[wd] = rootnode
-	
+
 	scanDir(rootnode)
-	
+
 	go eventProcessor(ch)
 	go w.watch(ch)
 

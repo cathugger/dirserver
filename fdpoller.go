@@ -1,9 +1,9 @@
 package main
 
 import (
+	"errors"
 	"golang.org/x/sys/unix"
 	"os"
-	"errors"
 )
 
 type fdPoller struct {
@@ -19,14 +19,14 @@ func newFDPoller(fd int32) (*fdPoller, error) {
 		efd:  -1,
 		pfds: [2]int32{-1, -1},
 	}
-	
+
 	// create epoll object
 	epfd, errno := unix.EpollCreate1(unix.EPOLL_CLOEXEC)
 	poller.efd = int32(epfd)
 	if epfd == -1 {
 		return nil, os.NewSyscallError("epoll_create1", errno)
 	}
-	
+
 	defer func() {
 		if errno != nil {
 			poller.close()
@@ -35,8 +35,8 @@ func newFDPoller(fd int32) (*fdPoller, error) {
 
 	// create wakeup pipe
 	var pfds [2]int
-	errno = unix.Pipe2(pfds[:], unix.O_NONBLOCK | unix.O_CLOEXEC)
-	poller.pfds = [2]int32{ int32(pfds[0]), int32(pfds[1]) }
+	errno = unix.Pipe2(pfds[:], unix.O_NONBLOCK|unix.O_CLOEXEC)
+	poller.pfds = [2]int32{int32(pfds[0]), int32(pfds[1])}
 	if errno != nil {
 		return nil, os.NewSyscallError("pipe2", errno)
 	}
@@ -60,7 +60,7 @@ func newFDPoller(fd int32) (*fdPoller, error) {
 	if errno != nil {
 		return nil, os.NewSyscallError("epoll_ctl", errno)
 	}
-	
+
 	return poller, nil
 }
 
