@@ -119,6 +119,39 @@ func servefolder(w http.ResponseWriter, r *http.Request) {
 	 * but that'd be useless without ability to specify multiple
 	 * child templates. and im too lazy for that
 	 */
+	fnx := func(w io.Writer, tag string, n *fsnode) (int, error) {
+		switch tag {
+		case "ud":
+			Y, M, D := n.upd.Date()
+			h, m, s := n.upd.Hour(), n.upd.Minute(), n.upd.Second()
+			return fmt.Fprintf(w, "%d-%02d-%02d %02d:%02d:%02d",
+				Y, M, D, h, m, s)
+		case "us":
+			if n.size >= 0 {
+				return fmt.Fprintf(w, "%d", n.size)
+			}
+		default:
+			panic("unknown tag type")
+		}
+		return 0, nil
+	}
+	fnn := func(w io.Writer, tag string, nam fsnamed) (int, error) {
+		chname := nam.name
+		chlname := nam.lname
+		switch tag {
+		case "un":
+			return w.Write(chname)
+		case "ln":
+			return w.Write(chlname)
+		case "hn":
+			template.HTMLEscape(w, chname)
+		case "jn":
+			template.JSEscape(w, chname)
+		default:
+			return fnx(w, tag, nam.node)
+		}
+		return 0, nil
+	}
 	fg := func(w io.Writer, tag string) (int, error) {
 		switch tag {
 		case "uf":
@@ -129,35 +162,15 @@ func servefolder(w http.ResponseWriter, r *http.Request) {
 			template.HTMLEscape(w, []byte(pf))
 		case "jf":
 			template.JSEscape(w, []byte(pf))
+		default:
+			return fnx(w, tag, cn)
 		}
 		return 0, nil
 	}
 	tbegin.ExecuteFunc(w, fg)
-	for i := range cn.chlist {
-		n := cn.chlist[i].node
-		chname := cn.chlist[i].name
-		chlname := cn.chlist[i].lname
+	for _, cx := range cn.chlist {
 		fc := func(w io.Writer, tag string) (int, error) {
-			switch tag {
-			case "un":
-				return w.Write(chname)
-			case "ln":
-				return w.Write(chlname)
-			case "hn":
-				template.HTMLEscape(w, chname)
-			case "jn":
-				template.JSEscape(w, chname)
-			case "ud":
-				Y, M, D := n.upd.Date()
-				h, m, s := n.upd.Hour(), n.upd.Minute(), n.upd.Second()
-				return fmt.Fprintf(w, "%d-%02d-%02d %02d:%02d:%02d",
-					Y, M, D, h, m, s)
-			case "us":
-				if n.size >= 0 {
-					return fmt.Fprintf(w, "%d", n.size)
-				}
-			}
-			return 0, nil
+			return fnn(w, tag, cx)
 		}
 		tlist.ExecuteFunc(w, fc)
 	}
