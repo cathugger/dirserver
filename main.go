@@ -32,6 +32,7 @@ type fsnode struct {
 	chlist []fsnamed
 	papas  []*fsnode
 	upd    time.Time
+	size   int64
 	fh     int32
 	wd     int32
 }
@@ -66,6 +67,10 @@ var (
 	tlist  *ft.Template
 	tend   *ft.Template
 )
+
+func escapeURLPath(s string) string {
+	return (&url.URL{Path: s}).EscapedPath()
+}
 
 func servefolder(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "GET" && r.Method != "HEAD" {
@@ -119,7 +124,7 @@ func servefolder(w http.ResponseWriter, r *http.Request) {
 		case "uf":
 			return w.Write([]byte(pf))
 		case "lf":
-			return w.Write([]byte((&url.URL{Path: pf}).EscapedPath()))
+			return w.Write([]byte(escapeURLPath(pf)))
 		case "hf":
 			template.HTMLEscape(w, []byte(pf))
 		case "jf":
@@ -147,6 +152,10 @@ func servefolder(w http.ResponseWriter, r *http.Request) {
 				h, m, s := n.upd.Hour(), n.upd.Minute(), n.upd.Second()
 				return fmt.Fprintf(w, "%d-%02d-%02d %02d:%02d:%02d",
 					Y, M, D, h, m, s)
+			case "us":
+				if n.size >= 0 {
+					return fmt.Fprintf(w, "%d", n.size)
+				}
 			}
 			return 0, nil
 		}
@@ -209,6 +218,17 @@ func sortNode(n *fsnode) {
 	})
 }
 
+func updateNode(n *fsnode) {
+	n.upd = time.Now().UTC()
+}
+
+func updatePapas(n *fsnode) {
+	t := time.Now().UTC()
+	for i := range n.papas {
+		n.papas[i].upd = t
+	}
+}
+
 // process inotify events
 func eventProcessor(ch <-chan Event) {
 	var err error
@@ -267,6 +287,7 @@ func eventProcessor(ch <-chan Event) {
 		}
 
 		handlecreate := func() {
+			updateNode(n)
 			namesl := append(ev.name, '/')
 			old := n.chmap[string(ev.name)]
 			delold := func() {
@@ -331,7 +352,8 @@ func eventProcessor(ch <-chan Event) {
 					} else {
 						// old was some dir. check if it's same
 						if wd != -1 && wd == old.wd {
-							// it's same. we already have it
+							// it's same. we already have it. just update it
+							old.upd = time.Unix(st.Mtim.Unix()).UTC()
 							unix.Close(oh)
 							return
 						} else {
@@ -348,26 +370,27 @@ func eventProcessor(ch <-chan Event) {
 					nn = watchToNode[wd]
 					if nn != nil {
 						unix.Close(oh) // no longer needed. we already have different handle to this
+						updatePapas(nn)
 						nn.papas = append(nn.papas, n)
-						// XXX update other stuff in file
 					}
 				}
 				if nn == nil {
 					nn = &fsnode{
-						upd:   time.Time{}, // XXX
 						fh:    int32(oh),
 						wd:    wd,
 						chmap: make(map[string]*fsnode),
 						papas: []*fsnode{n},
+						size:  -1,
 					}
 					if wd != -1 {
 						watchToNode[wd] = nn
 						scanDir(nn)
 					}
 				}
+				nn.upd = time.Unix(st.Mtim.Unix()).UTC()
 				n.chlist = append(n.chlist, fsnamed{
 					name:  namesl,
-					lname: []byte((&url.URL{Path: string(namesl)}).EscapedPath()),
+					lname: []byte(escapeURLPath(string(namesl))),
 					node:  nn,
 				})
 				n.chmap[string(ev.name)] = nn
@@ -386,19 +409,21 @@ func eventProcessor(ch <-chan Event) {
 							// continue adding
 						} else {
 							// old and new are files. just update
-							// XXX
+							old.upd = time.Unix(st.Mtim.Unix()).UTC()
+							old.size = st.Size
 							return
 						}
 					}
 					nn := &fsnode{
-						upd:   time.Time{}, // XXX
+						upd:   time.Unix(st.Mtim.Unix()).UTC(),
+						size:  st.Size,
 						fh:    -1,
 						wd:    -1,
 						papas: []*fsnode{n},
 					}
 					n.chlist = append(n.chlist, fsnamed{
 						name:  ev.name,
-						lname: []byte((&url.URL{Path: string(ev.name)}).EscapedPath()),
+						lname: []byte(escapeURLPath(string(ev.name))),
 						node:  nn,
 					})
 					n.chmap[string(ev.name)] = nn
@@ -432,12 +457,13 @@ func eventProcessor(ch <-chan Event) {
 					}
 					n.chlist = append(n.chlist, fsnamed{
 						name:  nam,
-						lname: []byte((&url.URL{Path: string(nam)}).EscapedPath()),
+						lname: []byte(escapeURLPath(string(nam))),
 						node:  movenode,
 					})
 					n.chmap[string(ev.name)] = movenode
 					movenode = nil
 					sortNode(n)
+					updateNode(n)
 					continue
 				}
 			}
@@ -452,7 +478,20 @@ func eventProcessor(ch <-chan Event) {
 			handlecreate()
 			continue
 		}
+		if ev.raw.Mask&unix.IN_ATTRIB != 0 {
+			// file/dir attrib were updated
+			fmt.Fprintf(os.Stderr, "dbg: attrib event, name(%s), dir(%t)\n", ev.name, dir)
+			handlecreate()
+			continue
+		}
+		if ev.raw.Mask&unix.IN_CLOSE_WRITE != 0 {
+			// file was closed, its attribs probably changed
+			fmt.Fprintf(os.Stderr, "dbg: closewrite event, name(%s), dir(%t)\n", ev.name, dir)
+			handlecreate()
+			continue
+		}
 		handledelete := func() {
+			updateNode(n)
 			old, ok := n.chmap[string(ev.name)]
 			if ok {
 				delete(n.chmap, string(ev.name))
@@ -489,6 +528,7 @@ func eventProcessor(ch <-chan Event) {
 		}
 		if ev.raw.Mask&unix.IN_MOVED_FROM != 0 {
 			// file/dir was moved from
+			updateNode(n)
 			fmt.Fprintf(os.Stderr, "dbg: moved from, name(%s), dir(%t), cookie(%d)\n", ev.name, dir, ev.raw.Cookie)
 			old, ok := n.chmap[string(ev.name)]
 			if ok {
@@ -762,18 +802,21 @@ func scanDir(n *fsnode) {
 				} else {
 					// old was file aswell. dont add new, update old
 					fmt.Fprintf(os.Stderr, "%q: old node is same file, leaving\n", fn)
+					old.upd = time.Unix(st.Mtim.Unix()).UTC()
+					old.size = st.Size
 					continue
 				}
 			}
 			nn := &fsnode{
-				upd:   time.Time{}, // XXX
+				upd:   time.Unix(st.Mtim.Unix()).UTC(),
+				size:  st.Size,
 				fh:    -1,
 				wd:    -1,
 				papas: []*fsnode{n},
 			}
 			n.chlist = append(n.chlist, fsnamed{
 				name:  []byte(fn),
-				lname: []byte((&url.URL{Path: fn}).EscapedPath()),
+				lname: []byte(escapeURLPath(fn)),
 				node:  nn,
 			})
 			n.chmap[fn] = nn
@@ -797,6 +840,7 @@ func scanDir(n *fsnode) {
 					if wd != -1 && old.wd == wd {
 						fmt.Fprintf(os.Stderr, "%q: old node is same dir, leaving\n", fn)
 						// ok it's same dir. update it. dont add new.
+						old.upd = time.Unix(st.Mtim.Unix()).UTC()
 						unix.Close(fh)
 						continue
 					} else {
@@ -815,12 +859,13 @@ func scanDir(n *fsnode) {
 				if nn != nil {
 					unix.Close(fh) // no longer needed. we already have different handle to this
 					nn.papas = append(nn.papas, n)
-					// XXX update other stuff in file
+					nn.upd = time.Unix(st.Mtim.Unix()).UTC()
 				}
 			}
 			if nn == nil {
 				nn = &fsnode{
-					upd:   time.Time{}, // XXX
+					upd:   time.Unix(st.Mtim.Unix()).UTC(),
+					size:  -1,
 					fh:    int32(fh),
 					wd:    wd,
 					chmap: make(map[string]*fsnode),
@@ -833,7 +878,7 @@ func scanDir(n *fsnode) {
 			}
 			n.chlist = append(n.chlist, fsnamed{
 				name:  []byte(namesl),
-				lname: []byte((&url.URL{Path: namesl}).EscapedPath()),
+				lname: []byte(escapeURLPath(namesl)),
 				node:  nn,
 			})
 			n.chmap[fn] = nn
@@ -899,6 +944,8 @@ func main() {
 		return
 	}
 	rootnode = &fsnode{
+		upd:   time.Now().UTC(),
+		size:  -1,
 		fh:    int32(dh),
 		wd:    wd,
 		chmap: make(map[string]*fsnode),
