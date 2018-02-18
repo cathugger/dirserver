@@ -784,7 +784,7 @@ func scanDir(n *fsnode) {
 		namesl := fn + "/"
 		old := n.chmap[fn]
 		delold := func() {
-			fmt.Fprintf(os.Stderr, "dbg: deleting old")
+			//fmt.Fprintf(os.Stderr, "dbg: deleting old")
 			delete(n.chmap, fn)
 			for i := range old.papas {
 				if old.papas[i] == n {
@@ -808,7 +808,7 @@ func scanDir(n *fsnode) {
 			}
 			killNode(old)
 		}
-		fmt.Fprintf(os.Stderr, "dbg: discovered file %q\n", fn)
+		//fmt.Fprintf(os.Stderr, "dbg: discovered file %q\n", fn)
 		fh, errno := unix.Openat(int(n.fh), fn, unix.O_RDONLY|unix.O_PATH, 0) // follow symlinks
 		if fh == -1 {
 			fmt.Fprintf(os.Stderr, "failed to open child dir %q, err: %v\n", fn, os.NewSyscallError("openat", errno))
@@ -829,7 +829,7 @@ func scanDir(n *fsnode) {
 		}
 		ft := st.Mode & unix.S_IFMT
 		if ft == unix.S_IFREG {
-			fmt.Fprintf(os.Stderr, "%q is regular\n", fn)
+			//fmt.Fprintf(os.Stderr, "%q is regular\n", fn)
 			unix.Close(fh)
 			if old != nil {
 				if old.fh != -1 {
@@ -861,7 +861,7 @@ func scanDir(n *fsnode) {
 
 			continue
 		} else if ft == unix.S_IFDIR {
-			fmt.Fprintf(os.Stderr, "%q is directory\n", fn)
+			//fmt.Fprintf(os.Stderr, "%q is directory\n", fn)
 			var wd int32
 			wd, err = addWatch(int32(fh))
 			if wd == -1 {
