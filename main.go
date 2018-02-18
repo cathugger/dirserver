@@ -15,6 +15,7 @@ import (
 	"io/ioutil"
 	"net/url"
 	"os"
+	"os/signal"
 	"path"
 	"strings"
 	"sync"
@@ -62,10 +63,11 @@ func cleanPath(p string) string {
 var (
 	prefix   string
 	rootnode *fsnode
-	//lock   sync.RWMutex
-	tbegin *ft.Template
-	tlist  *ft.Template
-	tend   *ft.Template
+	tmpldir  string
+	tlock    sync.RWMutex
+	thead    *ft.Template
+	tlist    *ft.Template
+	ttail    *ft.Template
 )
 
 func escapeURLPath(s string) string {
@@ -167,14 +169,18 @@ func servefolder(w http.ResponseWriter, r *http.Request) {
 		}
 		return 0, nil
 	}
-	tbegin.ExecuteFunc(w, fg)
+
+	tlock.RLock()
+	defer tlock.RUnlock()
+
+	thead.ExecuteFunc(w, fg)
 	for _, cx := range cn.chlist {
 		fc := func(w io.Writer, tag string) (int, error) {
 			return fnn(w, tag, cx)
 		}
 		tlist.ExecuteFunc(w, fc)
 	}
-	tend.ExecuteFunc(w, fg)
+	ttail.ExecuteFunc(w, fg)
 }
 
 var servedir string
@@ -913,12 +919,41 @@ func scanDir(n *fsnode) {
 	sortNode(n)
 }
 
+func loadTemplates() error {
+	fs, err := loadAllToStrs(tmpldir, "head.tmpl", "list.tmpl", "tail.tmpl")
+	if err != nil {
+		return fmt.Errorf("error reading tamplates: %v", err)
+	}
+
+	th, err := ft.NewTemplate(fs[0], "{{", "}}")
+	if err != nil {
+		return fmt.Errorf("error parsing head template: %v", err)
+	}
+	tl, err := ft.NewTemplate(fs[1], "{{", "}}")
+	if err != nil {
+		return fmt.Errorf("error parsing list template: %v", err)
+	}
+	tt, err := ft.NewTemplate(fs[2], "{{", "}}")
+	if err != nil {
+		return fmt.Errorf("error parsing tail template: %v", err)
+	}
+
+	tlock.Lock()
+	defer tlock.Unlock()
+
+	thead = th
+	tlist = tl
+	ttail = tt
+
+	return nil
+}
+
 func main() {
 	binds := bindst{}
 	flag.Var(&binds, "http", "http bind")
 	flag.StringVar(&prefix, "prefix", "/", "where root starts")
 	flag.StringVar(&servedir, "root", "./data", "root directory")
-	tmpldir := flag.String("tmpldir", "./tmpl", "template directory")
+	flag.StringVar(&tmpldir, "tmpldir", "./tmpl", "template directory")
 	flag.Parse()
 	if len(prefix) == 0 || prefix[len(prefix)-1] != '/' {
 		prefix += "/"
@@ -928,14 +963,22 @@ func main() {
 		return
 	}
 
-	fs, e := loadAllToStrs(*tmpldir, "head.tmpl", "list.tmpl", "tail.tmpl")
-	if e != nil {
-		fmt.Fprintf(os.Stderr, "error reading tamplates: %v\n", e)
+	if err := loadTemplates(); err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
 		return
 	}
-	tbegin = ft.New(fs[0], "{{", "}}")
-	tlist = ft.New(fs[1], "{{", "}}")
-	tend = ft.New(fs[2], "{{", "}}")
+	sc := make(chan os.Signal, 16)
+	signal.Notify(sc, unix.SIGHUP)
+	go func() {
+		for range sc {
+			fmt.Fprintf(os.Stderr, "got signal, reloading templates\n")
+			if err := loadTemplates(); err != nil {
+				fmt.Fprintf(os.Stderr, "template reload failed: %v\n", err)
+			} else {
+				fmt.Fprintf(os.Stderr, "template reload success\n")
+			}
+		}
+	}()
 
 	//go indexer()
 	w, e := newWatcher()
