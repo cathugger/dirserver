@@ -69,6 +69,7 @@ var (
 	tlist    *ft.Template
 	ttail    *ft.Template
 	dirlock  sync.Mutex
+	showdot  bool
 	startdir int32
 )
 
@@ -308,6 +309,10 @@ func eventProcessor(ch <-chan Event) {
 		}
 
 		handlecreate := func() {
+			if !showdot && len(ev.name) != 0 && ev.name[0] == '.' {
+				fmt.Fprintf(os.Stderr, "dbg: not creating dotfile\n")
+				return
+			}
 			updateNode(n)
 			namesl := append(ev.name, '/')
 			old := n.chmap[string(ev.name)]
@@ -462,6 +467,11 @@ func eventProcessor(ch <-chan Event) {
 		if ev.raw.Mask&unix.IN_MOVED_TO != 0 {
 			// file/dir was moved to
 			fmt.Fprintf(os.Stderr, "dbg: moved to, name(%s), dir(%t), cookie(%d)\n", ev.name, dir, ev.raw.Cookie)
+			if !showdot && len(ev.name) != 0 && ev.name[0] == '.' {
+				fmt.Fprintf(os.Stderr, "dbg: moved to dotfile. dropping\n")
+				killmovenode()
+				continue
+			}
 			if movenode != nil {
 				fmt.Fprintf(os.Stderr, "dbg: found old move node\n")
 				if moveCookie != ev.raw.Cookie {
@@ -512,12 +522,12 @@ func eventProcessor(ch <-chan Event) {
 			continue
 		}
 		handledelete := func() {
-			updateNode(n)
 			old, ok := n.chmap[string(ev.name)]
 			if ok {
 				delete(n.chmap, string(ev.name))
 			}
 			if old != nil {
+				updateNode(n)
 				for i := range old.papas {
 					if old.papas[i] == n {
 						old.papas = append(old.papas[:i], old.papas[i+1:]...)
@@ -549,13 +559,13 @@ func eventProcessor(ch <-chan Event) {
 		}
 		if ev.raw.Mask&unix.IN_MOVED_FROM != 0 {
 			// file/dir was moved from
-			updateNode(n)
 			fmt.Fprintf(os.Stderr, "dbg: moved from, name(%s), dir(%t), cookie(%d)\n", ev.name, dir, ev.raw.Cookie)
 			old, ok := n.chmap[string(ev.name)]
 			if ok {
 				delete(n.chmap, string(ev.name))
 			}
 			if old != nil {
+				updateNode(n)
 				for i := range old.papas {
 					if old.papas[i] == n {
 						old.papas = append(old.papas[:i], old.papas[i+1:]...)
@@ -765,7 +775,10 @@ func scanDir(n *fsnode) {
 	}
 	st := &unix.Stat_t{}
 	for _, fn := range names {
-		if fn == "." || fn == ".." {
+		if fn == "" || fn == "." || fn == ".." {
+			continue
+		}
+		if !showdot && fn[0] == '.' {
 			continue
 		}
 		namesl := fn + "/"
@@ -933,10 +946,10 @@ func loadTemplates() error {
 		return fmt.Errorf("failed to chdir: %v\n", os.NewSyscallError("fchdir", errno))
 	}
 	fs, err := loadAllToStrs(tmpldir, "head.tmpl", "list.tmpl", "tail.tmpl")
+	dirlock.Unlock()
 	if err != nil {
 		return fmt.Errorf("error reading tamplates: %v", err)
 	}
-	dirlock.Unlock()
 
 	th, err := ft.NewTemplate(fs[0], "{{", "}}")
 	if err != nil {
@@ -967,6 +980,7 @@ func main() {
 	flag.StringVar(&prefix, "prefix", "/", "where root starts")
 	flag.StringVar(&servedir, "root", "./data", "root directory")
 	flag.StringVar(&tmpldir, "tmpldir", "./tmpl", "template directory")
+	flag.BoolVar(&showdot, "showdot", false, "whether to show dotfiles or not")
 	flag.Parse()
 	if len(prefix) == 0 || prefix[len(prefix)-1] != '/' {
 		prefix += "/"
@@ -1000,7 +1014,6 @@ func main() {
 		}
 	}()
 
-	//go indexer()
 	w, e := newWatcher()
 	if e != nil {
 		fmt.Fprintf(os.Stderr, "error creating watcher: %v\n", e)
