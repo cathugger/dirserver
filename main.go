@@ -119,7 +119,7 @@ func servefolder(w http.ResponseWriter, r *http.Request) {
 		case "uf":
 			return w.Write([]byte(pf))
 		case "lf":
-			return w.Write([]byte(url.PathEscape(pf)))
+			return w.Write([]byte((&url.URL{Path: pf}).EscapedPath()))
 		case "hf":
 			template.HTMLEscape(w, []byte(pf))
 		case "jf":
@@ -362,7 +362,7 @@ func eventProcessor(ch <-chan Event) {
 				}
 				n.chlist = append(n.chlist, fsnamed{
 					name: namesl,
-					lname: []byte(url.PathEscape(string(namesl))),
+					lname: []byte((&url.URL{Path: string(namesl)}).EscapedPath()),
 					node: nn,
 				})
 				n.chmap[string(ev.name)] = nn
@@ -393,7 +393,7 @@ func eventProcessor(ch <-chan Event) {
 					}
 					n.chlist = append(n.chlist, fsnamed{
 						name: ev.name,
-						lname: []byte(url.PathEscape(string(ev.name))),
+						lname: []byte((&url.URL{Path: string(ev.name)}).EscapedPath()),
 						node: nn,
 					})
 					n.chmap[string(ev.name)] = nn
@@ -427,7 +427,7 @@ func eventProcessor(ch <-chan Event) {
 					}
 					n.chlist = append(n.chlist, fsnamed{
 						name: nam,
-						lname: []byte(url.PathEscape(string(nam))),
+						lname: []byte((&url.URL{Path: string(nam)}).EscapedPath()),
 						node: movenode,
 					})
 					n.chmap[string(ev.name)] = movenode
@@ -768,7 +768,7 @@ func scanDir(n *fsnode) {
 			}
 			n.chlist = append(n.chlist, fsnamed{
 				name: []byte(fn),
-				lname: []byte(url.PathEscape(fn)),
+				lname: []byte((&url.URL{Path: fn}).EscapedPath()),
 				node: nn,
 			})
 			n.chmap[fn] = nn
@@ -830,7 +830,7 @@ func scanDir(n *fsnode) {
 			}
 			n.chlist = append(n.chlist, fsnamed{
 				name: []byte(namesl),
-				lname: []byte(url.PathEscape(namesl)),
+				lname: []byte((&url.URL{Path: namesl}).EscapedPath()),
 				node: nn,
 			})
 			n.chmap[fn] = nn
