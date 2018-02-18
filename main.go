@@ -129,6 +129,7 @@ func servefolder(w http.ResponseWriter, r *http.Request) {
 	}
 	tbegin.ExecuteFunc(w, fg)
 	for i := range cn.chlist {
+		n := cn.chlist[i].node
 		chname := cn.chlist[i].name
 		chlname := cn.chlist[i].lname
 		fc := func(w io.Writer, tag string) (int, error) {
@@ -141,6 +142,11 @@ func servefolder(w http.ResponseWriter, r *http.Request) {
 				template.HTMLEscape(w, chname)
 			case "jn":
 				template.JSEscape(w, chname)
+			case "ud":
+				Y, M, D := n.upd.Date()
+				h, m, s := n.upd.Hour(), n.upd.Minute(), n.upd.Second()
+				return fmt.Fprintf(w, "%d-%02d-%02d %02d:%02d:%02d",
+					Y, M, D, h, m, s)
 			}
 			return 0, nil
 		}
@@ -882,7 +888,7 @@ func main() {
 	gwatcher = w
 	ch := make(chan Event, 1024)
 
-	dh, errno := unix.Open(servedir, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_PATH, 0)
+	dh, errno := unix.Open(servedir, unix.O_RDONLY|unix.O_PATH, 0)
 	if dh == -1 {
 		fmt.Fprintf(os.Stderr, "error opening watch dir: %v\n", errno)
 		return
