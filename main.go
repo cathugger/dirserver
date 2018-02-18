@@ -379,7 +379,7 @@ func eventProcessor(ch <-chan Event) {
 						// old was some dir. check if it's same
 						if wd != -1 && wd == old.wd {
 							// it's same. we already have it. just update it
-							old.upd = time.Unix(st.Mtim.Unix()).UTC()
+							old.upd = extractTime(st)
 							unix.Close(oh)
 							return
 						} else {
@@ -413,7 +413,7 @@ func eventProcessor(ch <-chan Event) {
 						scanDir(nn)
 					}
 				}
-				nn.upd = time.Unix(st.Mtim.Unix()).UTC()
+				nn.upd = extractTime(st)
 				n.chlist = append(n.chlist, fsnamed{
 					name:  namesl,
 					lname: []byte(escapeURLPath(string(namesl))),
@@ -435,13 +435,13 @@ func eventProcessor(ch <-chan Event) {
 							// continue adding
 						} else {
 							// old and new are files. just update
-							old.upd = time.Unix(st.Mtim.Unix()).UTC()
+							old.upd = extractTime(st)
 							old.size = st.Size
 							return
 						}
 					}
 					nn := &fsnode{
-						upd:   time.Unix(st.Mtim.Unix()).UTC(),
+						upd:   extractTime(st),
 						size:  st.Size,
 						fh:    -1,
 						wd:    -1,
@@ -750,6 +750,10 @@ func killNode(n *fsnode) {
 	n.chlist = nil
 }
 
+func extractTime(st *unix.Stat_t) time.Time {
+	return time.Unix(st.Mtim.Unix()).UTC()
+}
+
 func scanDir(n *fsnode) {
 	n.lock.Lock()
 	defer n.lock.Unlock()
@@ -840,13 +844,13 @@ func scanDir(n *fsnode) {
 				} else {
 					// old was file aswell. dont add new, update old
 					fmt.Fprintf(os.Stderr, "%q: old node is same file, leaving\n", fn)
-					old.upd = time.Unix(st.Mtim.Unix()).UTC()
+					old.upd = extractTime(st)
 					old.size = st.Size
 					continue
 				}
 			}
 			nn := &fsnode{
-				upd:   time.Unix(st.Mtim.Unix()).UTC(),
+				upd:   extractTime(st),
 				size:  st.Size,
 				fh:    -1,
 				wd:    -1,
@@ -897,12 +901,12 @@ func scanDir(n *fsnode) {
 				if nn != nil {
 					unix.Close(fh) // no longer needed. we already have different handle to this
 					nn.papas = append(nn.papas, n)
-					nn.upd = time.Unix(st.Mtim.Unix()).UTC()
+					nn.upd = extractTime(st)
 				}
 			}
 			if nn == nil {
 				nn = &fsnode{
-					upd:   time.Unix(st.Mtim.Unix()).UTC(),
+					upd:   extractTime(st),
 					size:  -1,
 					fh:    int32(fh),
 					wd:    wd,
