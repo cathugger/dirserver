@@ -212,11 +212,6 @@ var (
 	notyfyMapLock sync.RWMutex
 )
 
-type Event struct {
-	name []byte
-	raw  unix.InotifyEvent
-}
-
 var watchToNode = make(map[int32]*fsnode)
 
 func sortNode(n *fsnode) {
@@ -732,8 +727,6 @@ func scanDir(n *fsnode) {
 				node:  nn,
 			})
 			n.chmap[fn] = nn
-
-			continue
 		} else if ft == unix.S_IFDIR {
 			//fmt.Fprintf(os.Stderr, "%q is directory\n", fn)
 			var wd int32
@@ -794,18 +787,13 @@ func scanDir(n *fsnode) {
 				node:  nn,
 			})
 			n.chmap[fn] = nn
-
-			continue
-		} else if ft == unix.S_IFLNK {
-			fmt.Fprintf(os.Stderr, "%q is link(0x%04X)\n", fn, ft)
-			unix.Close(fh)
 		} else {
 			fmt.Fprintf(os.Stderr, "%q is unknown 0x%04X\n", fn, ft)
 			unix.Close(fh)
-		}
-		if old != nil {
-			fmt.Fprintf(os.Stderr, "%q: removing old node\n", fn)
-			delold()
+			if old != nil {
+				fmt.Fprintf(os.Stderr, "%q: removing old node\n", fn)
+				delold()
+			}
 		}
 	}
 
@@ -846,6 +834,45 @@ func loadTemplates() error {
 	ttail = tt
 
 	return nil
+}
+
+func eventProxy(src <-chan Event, dst chan<- Event) {
+	type Box struct {
+		events      [512]Event
+		next        *Box
+		read, write uint32
+	}
+	var nowr, noww *Box
+	noww = &Box{}
+	nowr = noww
+	for {
+		if nowr.read < nowr.write {
+			select {
+			case dst <- nowr.events[nowr.read]:
+				nowr.read++
+				if nowr.read >= nowr.write {
+					if nowr.next != nil {
+						nowr = nowr.next
+					} else {
+						nowr.read, nowr.write = 0, 0
+					}
+				}
+			case noww.events[noww.write] = <-src:
+				noww.write++
+				if int(noww.write) >= len(noww.events) {
+					noww.next = &Box{}
+					noww = noww.next
+				}
+			}
+		} else {
+			noww.events[noww.write] = <-src
+			noww.write++
+			if int(noww.write) >= len(noww.events) {
+				noww.next = &Box{}
+				noww = noww.next
+			}
+		}
+	}
 }
 
 func main() {
@@ -894,7 +921,10 @@ func main() {
 		return
 	}
 	gwatcher = w
-	ch := make(chan Event, 1024)
+	feed := make(chan Event, 32)
+	sink := make(chan Event, 1)
+	go eventProxy(feed, sink)
+	go w.watch(feed)
 
 	dh, errno := unix.Open(servedir, unix.O_RDONLY|unix.O_PATH, 0)
 	if dh == -1 {
@@ -918,8 +948,7 @@ func main() {
 
 	scanDir(rootnode)
 
-	go eventProcessor(ch)
-	go w.watch(ch)
+	go eventProcessor(sink)
 
 	var wg sync.WaitGroup
 	wg.Add(len(binds))

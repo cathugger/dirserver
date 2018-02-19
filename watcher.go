@@ -10,6 +10,11 @@ import (
 	"unsafe"
 )
 
+type Event struct {
+	name []byte
+	raw  unix.InotifyEvent
+}
+
 type watcher struct {
 	ifd int32
 	plr *fdPoller
