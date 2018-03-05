@@ -501,7 +501,10 @@ func eventProcessor(ch <-chan Event) {
 		if ev.raw.Mask&unix.IN_ATTRIB != 0 {
 			// file/dir attrib were updated
 			fmt.Fprintf(os.Stderr, "dbg: attrib event, name(%s), dir(%t)\n", ev.name, dir)
-			handlecreate()
+			// if empty, means "this dir". can safely ignore
+			if len(ev.name) != 0 {
+				handlecreate()
+			}
 			continue
 		}
 		if ev.raw.Mask&unix.IN_CLOSE_WRITE != 0 {
