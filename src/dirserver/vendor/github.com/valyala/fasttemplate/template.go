@@ -9,8 +9,9 @@ package fasttemplate
 import (
 	"bytes"
 	"fmt"
-	"github.com/valyala/bytebufferpool"
 	"io"
+
+	"github.com/valyala/bytebufferpool"
 )
 
 // ExecuteFunc calls f on each template tag (placeholder) occurrence.

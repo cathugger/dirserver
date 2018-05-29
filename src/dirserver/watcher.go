@@ -5,9 +5,10 @@ package main
 import (
 	"bytes"
 	"fmt"
-	"golang.org/x/sys/unix"
 	"os"
 	"unsafe"
+
+	"golang.org/x/sys/unix"
 )
 
 type Event struct {

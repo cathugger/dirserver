@@ -5,8 +5,6 @@ package main
 import (
 	"flag"
 	"fmt"
-	ft "github.com/valyala/fasttemplate"
-	"golang.org/x/sys/unix"
 	"io"
 	"io/ioutil"
 	"net/http"
@@ -19,6 +17,9 @@ import (
 	"sync"
 	"text/template"
 	"time"
+
+	ft "github.com/valyala/fasttemplate"
+	"golang.org/x/sys/unix"
 )
 
 type fsnode struct {
