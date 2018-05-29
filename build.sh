@@ -1,2 +1,2 @@
 #!/bin/sh
-GOPATH="$PWD" exec go get "$@" dirserver
+exec ./goget.sh dirserver
