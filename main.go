@@ -242,12 +242,14 @@ func updatePapas(n *fsnode) {
 
 // process inotify events
 func eventProcessor(ch <-chan Event) {
-	var err error
-	var wd int32
-	var n *fsnode
-	var oknode bool
-	var movenode *fsnode
-	var moveCookie uint32
+	var (
+		err        error
+		wd         int32
+		n          *fsnode
+		oknode     bool
+		movenode   *fsnode
+		moveCookie uint32
+	)
 	for {
 		if n != nil {
 			n.lock.Unlock()
@@ -453,6 +455,36 @@ func eventProcessor(ch <-chan Event) {
 			}
 			return
 		}
+		handledelete := func() {
+			old, ok := n.chmap[string(ev.name)]
+			if ok {
+				delete(n.chmap, string(ev.name))
+			}
+			if old != nil {
+				updateNode(n)
+				for i := range old.papas {
+					if old.papas[i] == n {
+						old.papas = append(old.papas[:i], old.papas[i+1:]...)
+						break // remove only one of them
+					}
+				}
+				var dnam []byte
+				if old.fh == -1 {
+					// what we search for was file
+					dnam = ev.name
+				} else {
+					// what we search for was dir
+					dnam = append(ev.name, '/')
+				}
+				for i := range n.chlist {
+					if string(n.chlist[i].name) == string(dnam) {
+						n.chlist = append(n.chlist[:i], n.chlist[i+1:]...)
+						break
+					}
+				}
+				killNode(old)
+			}
+		}
 		if ev.raw.Mask&unix.IN_MOVED_TO != 0 {
 			// file/dir was moved to
 			fmt.Fprintf(os.Stderr, "dbg: moved to, name(%s), dir(%t), cookie(%d)\n", ev.name, dir, ev.raw.Cookie)
@@ -467,7 +499,10 @@ func eventProcessor(ch <-chan Event) {
 					fmt.Fprintf(os.Stderr, "dbg: old move cookie(%d) does not match new. dropping\n", moveCookie)
 					killmovenode()
 				} else {
-					// all checks out, just put it in
+					// all checks out
+					// kill old node, if any
+					handledelete()
+					// put it in
 					movenode.papas = append(movenode.papas, n)
 					var nam []byte
 					if movenode.fh == -1 {
@@ -512,36 +547,6 @@ func eventProcessor(ch <-chan Event) {
 			fmt.Fprintf(os.Stderr, "dbg: closewrite event, name(%s), dir(%t)\n", ev.name, dir)
 			handlecreate()
 			continue
-		}
-		handledelete := func() {
-			old, ok := n.chmap[string(ev.name)]
-			if ok {
-				delete(n.chmap, string(ev.name))
-			}
-			if old != nil {
-				updateNode(n)
-				for i := range old.papas {
-					if old.papas[i] == n {
-						old.papas = append(old.papas[:i], old.papas[i+1:]...)
-						break // remove only one of them
-					}
-				}
-				var dnam []byte
-				if old.fh == -1 {
-					// what we search for was file
-					dnam = ev.name
-				} else {
-					// what we search for was dir
-					dnam = append(ev.name, '/')
-				}
-				for i := range n.chlist {
-					if string(n.chlist[i].name) == string(dnam) {
-						n.chlist = append(n.chlist[:i], n.chlist[i+1:]...)
-						break
-					}
-				}
-				killNode(old)
-			}
 		}
 		if ev.raw.Mask&unix.IN_DELETE != 0 {
 			// file/dir was deleted
