@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
 	"io"
@@ -301,8 +302,8 @@ func eventProcessor(ch <-chan Event) {
 		}
 
 		handlecreate := func() {
-			if !showdot && len(ev.name) != 0 && ev.name[0] == '.' {
-				fmt.Fprintf(os.Stderr, "dbg: not creating dotfile\n")
+			if hideFilenameSlice(ev.name) {
+				fmt.Fprintf(os.Stderr, "dbg: not creating hidden %q\n", ev.name)
 				return
 			}
 			updateNode(n)
@@ -459,10 +460,10 @@ func eventProcessor(ch <-chan Event) {
 		handledelete := func() {
 			old, ok := n.chmap[string(ev.name)]
 			if ok {
+				updateNode(n)
 				delete(n.chmap, string(ev.name))
 			}
 			if old != nil {
-				updateNode(n)
 				for i := range old.papas {
 					if old.papas[i] == n {
 						old.papas = append(old.papas[:i], old.papas[i+1:]...)
@@ -478,7 +479,7 @@ func eventProcessor(ch <-chan Event) {
 					dnam = append(ev.name, '/')
 				}
 				for i := range n.chlist {
-					if string(n.chlist[i].name) == string(dnam) {
+					if bytes.Equal(n.chlist[i].name, dnam) {
 						n.chlist = append(n.chlist[:i], n.chlist[i+1:]...)
 						break
 					}
@@ -488,9 +489,10 @@ func eventProcessor(ch <-chan Event) {
 		}
 		if ev.raw.Mask&unix.IN_MOVED_TO != 0 {
 			// file/dir was moved to
-			fmt.Fprintf(os.Stderr, "dbg: moved to, name(%s), dir(%t), cookie(%d)\n", ev.name, dir, ev.raw.Cookie)
-			if !showdot && len(ev.name) != 0 && ev.name[0] == '.' {
-				fmt.Fprintf(os.Stderr, "dbg: moved to dotfile. dropping\n")
+			fmt.Fprintf(os.Stderr, "dbg: moved to, name %q, dir %t, cookie %q\n",
+				ev.name, dir, ev.raw.Cookie)
+			if hideFilenameSlice(ev.name) {
+				fmt.Fprintf(os.Stderr, "dbg: moved to hidden. dropping\n")
 				killmovenode()
 				continue
 			}
@@ -527,13 +529,16 @@ func eventProcessor(ch <-chan Event) {
 			handlecreate()
 			continue
 		}
+		// if it wasn't move, clean move state
 		killmovenode()
+
 		if ev.raw.Mask&unix.IN_CREATE != 0 {
 			// file/dir was made
 			fmt.Fprintf(os.Stderr, "dbg: create event, name(%s), dir(%t)\n", ev.name, dir)
 			handlecreate()
 			continue
 		}
+
 		if ev.raw.Mask&unix.IN_ATTRIB != 0 {
 			// file/dir attrib were updated
 			fmt.Fprintf(os.Stderr, "dbg: attrib event, name(%s), dir(%t)\n", ev.name, dir)
@@ -543,18 +548,21 @@ func eventProcessor(ch <-chan Event) {
 			}
 			continue
 		}
+
 		if ev.raw.Mask&unix.IN_CLOSE_WRITE != 0 {
 			// file was closed, its attribs probably changed
 			fmt.Fprintf(os.Stderr, "dbg: closewrite event, name(%s), dir(%t)\n", ev.name, dir)
 			handlecreate()
 			continue
 		}
+
 		if ev.raw.Mask&unix.IN_DELETE != 0 {
 			// file/dir was deleted
 			fmt.Fprintf(os.Stderr, "dbg: delete event, name(%s), dir(%t)\n", ev.name, dir)
 			handledelete()
 			continue
 		}
+
 		if ev.raw.Mask&unix.IN_MOVED_FROM != 0 {
 			// file/dir was moved from
 			fmt.Fprintf(os.Stderr, "dbg: moved from, name(%s), dir(%t), cookie(%d)\n", ev.name, dir, ev.raw.Cookie)
@@ -628,6 +636,23 @@ func extractTime(st *unix.Stat_t) time.Time {
 	return time.Unix(st.Mtim.Unix()).UTC()
 }
 
+func hideFilename(fn string) bool {
+	return fn == "" ||
+		fn == "." ||
+		fn == ".." ||
+		strings.HasPrefix(fn, "._") ||
+		(fn[0] == '.' && !showdot)
+}
+
+func hideFilenameSlice(fn []byte) bool {
+	return len(fn) == 0 ||
+		(fn[0] == '.' &&
+			(!showdot ||
+				len(fn) == 1 ||
+				(len(fn) == 2 && fn[1] == '.') ||
+				fn[1] == '_'))
+}
+
 func scanDir(n *fsnode) {
 	n.lock.Lock()
 	defer n.lock.Unlock()
@@ -653,10 +678,7 @@ func scanDir(n *fsnode) {
 	}
 	st := &unix.Stat_t{}
 	for _, fn := range names {
-		if fn == "" || fn == "." || fn == ".." {
-			continue
-		}
-		if !showdot && fn[0] == '.' {
+		if hideFilename(fn) {
 			continue
 		}
 		namesl := fn + "/"
