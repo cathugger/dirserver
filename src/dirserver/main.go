@@ -73,6 +73,32 @@ func escapeURLPath(s string) string {
 	return (&url.URL{Path: s}).EscapedPath()
 }
 
+type specialFunc func(w http.ResponseWriter, entry string, node *fsnode, prev, next string) bool
+
+var specialEntries = map[string]specialFunc{
+	"zip":  zipHandler,
+	"tar":  tarHandler,
+	"opus": opusHandler,
+}
+
+func processSpecial(w http.ResponseWriter, entry string, node *fsnode, prev, next string) bool {
+	const pfx = "._"
+
+	if !strings.HasPrefix(entry, pfx) {
+		return false
+	}
+
+	entry = entry[len(pfx):]
+
+	specfunc := specialEntries[entry]
+
+	if specfunc == nil || !specfunc(w, entry, node, prev, next) {
+		http.Error(w, "400 bad request", 400)
+	}
+
+	return true
+}
+
 func servefolder(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "GET" && r.Method != "HEAD" {
 		http.Error(w, "405 method not allowed", 405)
@@ -86,33 +112,59 @@ func servefolder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	pf := r.URL.Path
-	if len(pf) < len(prefix) || pf[:len(prefix)] != prefix || pf[len(pf)-1] != '/' {
+	if !strings.HasPrefix(pf, prefix) {
+		// it doesn't start with our prefix
 		http.Error(w, "500 we're not supposed to serve this", 500)
 		return
 	}
 	pp := pf[len(prefix):]
-	pc := pp
 	cn := rootnode
+	li := 0
 
 	cn.lock.RLock()
 	// walk to node we want
 	for {
-		is := strings.IndexByte(pc, '/')
+		is := strings.IndexByte(pp[li:], '/')
 		if is < 0 {
 			break
 		}
-		ch := cn.chmap[pc[:is]]
-		if ch == nil || ch.fh == -1 {
+		is += li
+
+		ch := cn.chmap[pp[li:is]]
+		if ch == nil {
+			if processSpecial(w, pp[li:is], cn, pp[:li], pp[is:]) {
+				cn.lock.RUnlock()
+				return
+			}
+
 			cn.lock.RUnlock()
 			http.NotFound(w, r)
 			return
 		}
-		pc = pc[is+1:]
+
+		li = is + 1
 		cn.lock.RUnlock()
 		cn = ch
 		cn.lock.RLock()
 	}
 	defer cn.lock.RUnlock()
+
+	if processSpecial(w, pp[li:], cn, pp[:li], "") {
+		return
+	}
+
+	if cn.fh == -1 {
+		// we landed on file
+		http.NotFound(w, r)
+		return
+	}
+
+	if pp[li:] != "" {
+		// it doesn't end with slash
+		http.Error(w, "500 we're not supposed to serve this", 500)
+		return
+	}
+
 	// XXX check not modified headers?
 	// print stuff
 	/*
