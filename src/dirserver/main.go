@@ -301,7 +301,7 @@ func sortNode(n *fsnode) {
 		if res > 0 {
 			return false
 		}
-		return string(cl[i].name) < string(cl[j].name)
+		return bytes.Compare(cl[i].name, cl[j].name) < 0
 	})
 }
 
