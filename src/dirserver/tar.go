@@ -9,7 +9,7 @@ func tarHandler(
 	w http.ResponseWriter, entry string,
 	node *fsnode, prev, next string) bool {
 
-	const sfx = ".zip"
+	const sfx = ".tar"
 
 	if next == "" {
 		return false

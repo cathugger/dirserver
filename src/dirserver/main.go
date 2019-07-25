@@ -21,6 +21,8 @@ import (
 
 	ft "github.com/valyala/fasttemplate"
 	"golang.org/x/sys/unix"
+	"golang.org/x/text/collate"
+	"golang.org/x/text/language"
 )
 
 type fsnode struct {
@@ -268,15 +270,35 @@ var (
 
 var watchToNode = make(map[int32]*fsnode)
 
+// XXX looking at code it seems these aren't MP-friendly, but we're doing this from single thread so should be okay
+var collNoCase = collate.New(language.Und, collate.IgnoreCase)
+var collCase = collate.New(language.Und)
+
 func sortNode(n *fsnode) {
 	cl := n.chlist
 	sort.Slice(cl, func(i, j int) bool {
+		// sort dirs first
 		d1 := cl[i].node.fh != -1
 		d2 := cl[j].node.fh != -1
 		if d1 && !d2 {
 			return true
 		}
 		if !d1 && d2 {
+			return false
+		}
+
+		res := collNoCase.Compare(cl[i].name, cl[j].name)
+		if res < 0 {
+			return true
+		}
+		if res > 0 {
+			return false
+		}
+		res = collCase.Compare(cl[i].name, cl[j].name)
+		if res < 0 {
+			return true
+		}
+		if res > 0 {
 			return false
 		}
 		return string(cl[i].name) < string(cl[j].name)
