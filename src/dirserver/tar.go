@@ -11,19 +11,60 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func compressDirContents(tw *tar.Writer, n *fsnode, dirpfx string) {
-	if n.fh < 0 {
-		panic("not directory")
-	}
-	for i := range n.chlist {
-		nn := n.chlist[i].node
-		isdir := nn.fh >= 0
-		hdr := tar.Header{Name: dirpfx + n.chlist[i].name}
-		if !isdir {
+func doCompress(twx *tar.Writer, nx *fsnode, dirpfxx string) {
+
+	var prevnodes []*fsnode
+
+	var compressDirContents func(tw *tar.Writer, n *fsnode, dirpfx string)
+
+	compressDirContents = func(tw *tar.Writer, n *fsnode, dirpfx string) {
+		if n.fh < 0 {
+			panic("not directory")
+		}
+
+		prevnodes = append(prevnodes, n)
+
+		var hdr tar.Header
+
+		n.lock.RLock()
+		fh := n.fh
+		chlist := n.chlist
+		updt := n.upd
+		n.lock.RUnlock()
+
+		if dirpfx != "" {
+			hdr = tar.Header{
+				Name:    dirpfx,
+				Mode:    0755,
+				ModTime: updt,
+			}
+			tw.WriteHeader(&hdr)
+		}
+
+		for i := range chlist {
+			nn := chlist[i].node
+
+			hdr = tar.Header{Name: dirpfx + chlist[i].name}
+
+			// directory
+			if nn.fh >= 0 {
+				// check for loop
+				for _, pn := range prevnodes {
+					if pn == n {
+						goto loopdetected
+					}
+				}
+
+				compressDirContents(tw, nn, hdr.Name)
+
+			loopdetected:
+				continue
+			}
+
 			hdr.Mode = 0644
 
 			const oflags = int(unix.O_RDONLY)
-			oh, errno := unix.Openat(int(n.fh), hdr.Name, oflags, 0)
+			oh, errno := unix.Openat(int(fh), hdr.Name, oflags, 0)
 			if oh < 0 || errno != nil {
 				// failed to open - skip
 				fmt.Fprintf(
@@ -55,16 +96,12 @@ func compressDirContents(tw *tar.Writer, n *fsnode, dirpfx string) {
 				panic("file copying failed: " + err.Error())
 			}
 			_ = f.Close()
-
-		} else {
-			hdr.Mode = 0755
-			hdr.ModTime = nn.upd
-
-			tw.WriteHeader(&hdr)
-
-			compressDirContents(tw, nn, hdr.Name)
 		}
+
+		prevnodes = prevnodes[:len(prevnodes)-1] // un-append
 	}
+
+	compressDirContents(twx, nx, dirpfxx)
 }
 
 func tarHandler(
@@ -93,5 +130,14 @@ func tarHandler(
 		return false
 	}
 
-	return false
+	tw := tar.NewWriter(w)
+
+	if next != "" {
+		next += "/"
+	}
+	doCompress(tw, node, next)
+
+	tw.Close()
+
+	return true
 }
