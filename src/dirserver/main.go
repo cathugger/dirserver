@@ -1002,6 +1002,8 @@ func main() {
 		return
 	}
 
+	fmt.Fprintf(os.Stderr, "ohayo!\n")
+
 	sdir, errno := unix.Open(".", unix.O_RDONLY|unix.O_PATH, 0)
 	startdir = int32(sdir)
 	if sdir < 0 || errno != nil {
@@ -1062,6 +1064,8 @@ func main() {
 	scanDir(rootnode)
 
 	go eventProcessor(sink)
+
+	fmt.Fprintf(os.Stderr, "initialization done.\n")
 
 	var wg sync.WaitGroup
 	wg.Add(len(binds))

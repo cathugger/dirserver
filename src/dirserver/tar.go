@@ -127,7 +127,7 @@ func tarHandler(
 	next = next[:len(next)-len(sfx)]
 
 	if !strings.HasSuffix(prev, next) ||
-		(len(prev[:len(next)]) != 0 && prev[len(next)-1] != '/') {
+		(len(prev) > len(next) && prev[len(prev)-len(next)-1] != '/') {
 
 		fmt.Fprintf(os.Stderr, "tar: prev %q not matching next %q\n", prev, next)
 		return false
