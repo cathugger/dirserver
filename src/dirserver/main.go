@@ -121,37 +121,37 @@ func servefolder(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "500 we're not supposed to serve this", 500)
 		return
 	}
-	pp := pf[len(prefix):]
+	pp := pf[len(prefix)-1:]
 	cn := rootnode
 	li := 0
 
 	cn.lock.RLock()
 	// walk to node we want
 	for {
-		is := strings.IndexByte(pp[li:], '/')
+		is := strings.IndexByte(pp[li+1:], '/')
 		if is < 0 {
 			break
 		}
-		is += li
+		is += li + 1
 
-		ch := cn.chmap[pp[li:is]]
+		ch := cn.chmap[pp[li+1:is]]
 		if ch == nil {
 			cn.lock.RUnlock()
 
-			if !processSpecial(w, pp[li:is], cn, pp[:li], pp[is:]) {
+			if !processSpecial(w, pp[li+1:is], cn, pp[:li], pp[is:]) {
 				http.NotFound(w, r)
 			}
 			return
 		}
 
-		li = is + 1
+		li = is
 		cn.lock.RUnlock()
 		cn = ch
 		cn.lock.RLock()
 	}
 	defer cn.lock.RUnlock()
 
-	if processSpecial(w, pp[li:], cn, pp[:li], "") {
+	if processSpecial(w, pp[li+1:], cn, pp[:li], "") {
 		return
 	}
 

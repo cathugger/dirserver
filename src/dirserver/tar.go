@@ -124,7 +124,7 @@ func tarHandler(
 		return false
 	}
 
-	next = next[:len(sfx)]
+	next = next[:len(next)-len(sfx)]
 
 	if !strings.HasSuffix(prev, next) ||
 		(len(prev[:len(next)]) != 0 && prev[len(next)-1] != '/') {
