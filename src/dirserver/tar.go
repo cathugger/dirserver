@@ -111,6 +111,7 @@ func tarHandler(
 	const sfx = ".tar"
 
 	if next == "" {
+		fmt.Fprintf(os.Stderr, "tar: next is empty\n")
 		return false
 	}
 	// skip leading '/'
@@ -119,6 +120,7 @@ func tarHandler(
 	if strings.IndexByte(next, '/') >= 0 ||
 		!strings.HasSuffix(next, sfx) {
 
+		fmt.Fprintf(os.Stderr, "tar: next %q not suitable\n", next)
 		return false
 	}
 
@@ -127,6 +129,7 @@ func tarHandler(
 	if !strings.HasSuffix(prev, next) ||
 		(len(prev[:len(next)]) != 0 && prev[len(next)-1] != '/') {
 
+		fmt.Fprintf(os.Stderr, "tar: prev %q not matching next %q\n", prev, next)
 		return false
 	}
 
