@@ -43,8 +43,9 @@ func doCompress(twx *tar.Writer, nx *fsnode, dirpfxx string) {
 
 		for i := range chlist {
 			nn := chlist[i].node
+			name := chlist[i].name
 
-			hdr = tar.Header{Name: dirpfx + chlist[i].name}
+			hdr = tar.Header{Name: dirpfx + name}
 
 			// directory
 			if nn.fh >= 0 {
@@ -64,13 +65,13 @@ func doCompress(twx *tar.Writer, nx *fsnode, dirpfxx string) {
 			hdr.Mode = 0644
 
 			const oflags = int(unix.O_RDONLY)
-			oh, errno := unix.Openat(int(fh), hdr.Name, oflags, 0)
+			oh, errno := unix.Openat(int(fh), name, oflags, 0)
 			if oh < 0 || errno != nil {
 				// failed to open - skip
 				fmt.Fprintf(
 					os.Stderr,
 					"got error on openat %q: %v\n",
-					hdr.Name, os.NewSyscallError("openat", errno))
+					name, os.NewSyscallError("openat", errno))
 				continue
 			}
 
@@ -81,7 +82,7 @@ func doCompress(twx *tar.Writer, nx *fsnode, dirpfxx string) {
 				fmt.Fprintf(
 					os.Stderr,
 					"failed to stat %q: %v\n",
-					hdr.Name, os.NewSyscallError("fstatat", errno))
+					name, os.NewSyscallError("fstatat", errno))
 				continue
 			}
 			hdr.ModTime = extractTime(st)
