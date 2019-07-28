@@ -14,6 +14,7 @@ import (
 func doCompress(twx *tar.Writer, nx *fsnode, dirpfxx string) {
 
 	var prevnodes []*fsnode
+	var hdr tar.Header
 
 	var compressDirContents func(tw *tar.Writer, n *fsnode, dirpfx string)
 
@@ -24,11 +25,11 @@ func doCompress(twx *tar.Writer, nx *fsnode, dirpfxx string) {
 
 		prevnodes = append(prevnodes, n)
 
-		var hdr tar.Header
-
 		n.lock.RLock()
 		fh := n.fh
-		chlist := n.chlist
+		// copy 1 lvl of contents
+		chlist := make([]fsnamed, len(n.chlist))
+		copy(chlist, n.chlist)
 		updt := n.upd
 		n.lock.RUnlock()
 
@@ -115,29 +116,24 @@ func tarHandler(
 		fmt.Fprintf(os.Stderr, "tar: next is empty\n")
 		return false
 	}
-	// skip leading '/'
-	next = next[1:]
 
-	if strings.IndexByte(next, '/') >= 0 ||
-		!strings.HasSuffix(next, sfx) {
-
+	if strings.IndexByte(next[1:], '/') >= 0 || !strings.HasSuffix(next, sfx) {
 		fmt.Fprintf(os.Stderr, "tar: next %q not suitable\n", next)
 		return false
 	}
 
 	next = next[:len(next)-len(sfx)]
 
-	if !strings.HasSuffix(prev, next) ||
-		(len(prev) > len(next) && prev[len(prev)-len(next)-1] != '/') {
-
+	if !strings.HasSuffix(prev, next) {
 		fmt.Fprintf(os.Stderr, "tar: prev %q not matching next %q\n", prev, next)
 		return false
 	}
 
 	tw := tar.NewWriter(w)
 
+	next = next[1:] // skip leading '/'
 	if next != "" {
-		next += "/"
+		next += "/" // need trailing / to indicate dir
 	}
 	doCompress(tw, node, next)
 

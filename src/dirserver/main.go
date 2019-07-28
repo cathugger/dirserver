@@ -121,9 +121,9 @@ func servefolder(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "500 we're not supposed to serve this", 500)
 		return
 	}
-	pp := pf[len(prefix)-1:]
+	pp := pf
 	cn := rootnode
-	li := 0
+	li := len(prefix) - 1
 
 	cn.lock.RLock()
 	// walk to node we want
@@ -161,7 +161,7 @@ func servefolder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if pp[li:] != "" {
+	if pp[li+1:] != "" {
 		// it doesn't end with slash
 		http.Error(w, "500 we're not supposed to serve this", 500)
 		return
@@ -210,13 +210,13 @@ func servefolder(w http.ResponseWriter, r *http.Request) {
 	fg := func(w io.Writer, tag string) (int, error) {
 		switch tag {
 		case "uf":
-			return w.Write([]byte(pf))
+			return w.Write(unsafeStrToBytes(pf))
 		case "lf":
-			return w.Write([]byte(escapeURLPath(pf)))
+			return w.Write(unsafeStrToBytes(escapeURLPath(pf)))
 		case "hf":
-			template.HTMLEscape(w, []byte(pf))
+			template.HTMLEscape(w, unsafeStrToBytes(pf))
 		case "jf":
-			template.JSEscape(w, []byte(pf))
+			template.JSEscape(w, unsafeStrToBytes(pf))
 		default:
 			return fnx(w, tag, cn)
 		}
