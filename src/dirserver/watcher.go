@@ -12,7 +12,7 @@ import (
 )
 
 type Event struct {
-	name []byte
+	name string // this needs to be copied either way so mem alloc needs to happen
 	raw  unix.InotifyEvent
 }
 
@@ -107,16 +107,16 @@ func (w *watcher) watch(ch chan<- Event) {
 		for offset <= uint32(n-unix.SizeofInotifyEvent) {
 			ev := (*unix.InotifyEvent)(unsafe.Pointer(&buf[offset]))
 			nameLen := ev.Len
-			var name []byte
+			var xname []byte
 			if nameLen > 0 {
 				bname := (*[unix.PathMax]byte)(unsafe.Pointer(&buf[offset+unix.SizeofInotifyEvent]))
-				if i := bytes.IndexByte(bname[:nameLen], '\000'); i >= 0 {
-					name = bname[:i]
+				if i := bytes.IndexByte(bname[:nameLen], 0); i >= 0 {
+					xname = bname[:i]
 				} else {
-					name = bname[:nameLen]
+					xname = bname[:nameLen]
 				}
 			}
-			ch <- Event{name: append([]byte(nil), name...), raw: *ev}
+			ch <- Event{name: string(xname), raw: *ev}
 			offset += unix.SizeofInotifyEvent + nameLen
 		}
 	}

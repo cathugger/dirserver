@@ -3,7 +3,6 @@
 package main
 
 import (
-	"bytes"
 	"flag"
 	"fmt"
 	"io"
@@ -37,8 +36,8 @@ type fsnode struct {
 }
 
 type fsnamed struct {
-	name  []byte  // filename. includes / for dirs.
-	lname []byte  // path-escaped, for use with links
+	name  string  // filename. includes / for dirs.
+	lname string  // path-escaped above, for use with links
 	node  *fsnode // nod nod nod
 }
 
@@ -155,7 +154,7 @@ func servefolder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if cn.fh == -1 {
+	if cn.fh < 0 {
 		// we landed on file
 		http.NotFound(w, r)
 		return
@@ -191,8 +190,8 @@ func servefolder(w http.ResponseWriter, r *http.Request) {
 		return 0, nil
 	}
 	fnn := func(w io.Writer, tag string, nam fsnamed) (int, error) {
-		chname := nam.name
-		chlname := nam.lname
+		chname := unsafeStrToBytes(nam.name)
+		chlname := unsafeStrToBytes(nam.lname)
 		switch tag {
 		case "un":
 			return w.Write(chname)
@@ -278,8 +277,8 @@ func sortNode(n *fsnode) {
 	cl := n.chlist
 	sort.Slice(cl, func(i, j int) bool {
 		// sort dirs first
-		d1 := cl[i].node.fh != -1
-		d2 := cl[j].node.fh != -1
+		d1 := cl[i].node.fh >= 0
+		d2 := cl[j].node.fh >= 0
 		if d1 && !d2 {
 			return true
 		}
@@ -287,21 +286,21 @@ func sortNode(n *fsnode) {
 			return false
 		}
 
-		res := collNoCase.Compare(cl[i].name, cl[j].name)
+		res := collNoCase.CompareString(cl[i].name, cl[j].name)
 		if res < 0 {
 			return true
 		}
 		if res > 0 {
 			return false
 		}
-		res = collCase.Compare(cl[i].name, cl[j].name)
+		res = collCase.CompareString(cl[i].name, cl[j].name)
 		if res < 0 {
 			return true
 		}
 		if res > 0 {
 			return false
 		}
-		return bytes.Compare(cl[i].name, cl[j].name) < 0
+		return cl[i].name < cl[j].name
 	})
 }
 
@@ -330,7 +329,9 @@ func eventProcessor(ch <-chan Event) {
 		if n != nil {
 			n.lock.Unlock()
 		}
+
 		ev := <-ch
+
 		killmovenode := func() {
 			if movenode != nil {
 				fmt.Fprintf(os.Stderr, "dbg: killing move node\n")
@@ -369,31 +370,31 @@ func eventProcessor(ch <-chan Event) {
 			delete(watchToNode, ev.raw.Wd)
 			continue // XXX?
 		}
-		if n.fh == -1 {
+		if n.fh < 0 {
 			killmovenode()
 			fmt.Fprintf(os.Stderr, "dbg: event on dead or non-dir node, name(%s)\n", ev.name)
 			continue
 		}
 
 		handlecreate := func() {
-			if hideFilenameSlice(ev.name) {
+			if hideFilename(ev.name) {
 				fmt.Fprintf(os.Stderr, "dbg: not creating hidden %q\n", ev.name)
 				return
 			}
 			updateNode(n)
-			namesl := append(ev.name, '/')
-			old := n.chmap[string(ev.name)]
+			namesl := ev.name + "/"
+			old := n.chmap[ev.name]
 			delold := func() {
 				fmt.Fprintf(os.Stderr, "dbg: deleting old node\n")
-				delete(n.chmap, string(ev.name))
+				delete(n.chmap, ev.name)
 				for i := range old.papas {
 					if old.papas[i] == n {
 						old.papas = append(old.papas[:i], old.papas[i+1:]...)
 						break // remove only one of them
 					}
 				}
-				var dnam []byte
-				if old.fh == -1 {
+				var dnam string
+				if old.fh < 0 {
 					// what we search for was file
 					dnam = ev.name
 				} else {
@@ -401,7 +402,7 @@ func eventProcessor(ch <-chan Event) {
 					dnam = namesl
 				}
 				for i := range n.chlist {
-					if string(n.chlist[i].name) == string(dnam) {
+					if n.chlist[i].name == dnam {
 						n.chlist = append(n.chlist[:i], n.chlist[i+1:]...)
 						break
 					}
@@ -409,9 +410,9 @@ func eventProcessor(ch <-chan Event) {
 				killNode(old)
 			}
 			// open handle which can persist
-			var oflags = int(unix.O_RDONLY | unix.O_PATH) // intentionally follow symlinks
-			oh, errno := unix.Openat(int(n.fh), string(ev.name), oflags, 0)
-			if oh == -1 {
+			const oflags = int(unix.O_RDONLY | unix.O_PATH) // intentionally follow symlinks
+			oh, errno := unix.Openat(int(n.fh), ev.name, oflags, 0)
+			if oh < 0 {
 				fmt.Fprintf(os.Stderr, "ignoring, got error on openat: %v\n", os.NewSyscallError("openat", errno))
 				if old != nil {
 					delold()
@@ -433,18 +434,18 @@ func eventProcessor(ch <-chan Event) {
 			if ft == unix.S_IFDIR {
 				// dir is kinda ready, just attach watch and scan it
 				wd, err = addWatch(int32(oh))
-				if wd == -1 {
+				if wd < 0 {
 					fmt.Fprintf(os.Stderr, "bogus, error trying to add watch for %q: %v\n", ev.name, err)
 				}
 
 				if old != nil {
-					if old.fh == -1 {
+					if old.fh < 0 {
 						// old was file. rid of it
 						delold()
 						// continue adding
 					} else {
 						// old was some dir. check if it's same
-						if wd != -1 && wd == old.wd {
+						if wd >= 0 && wd == old.wd {
 							// it's same. we already have it. just update it
 							old.upd = extractTime(st)
 							unix.Close(oh)
@@ -459,7 +460,7 @@ func eventProcessor(ch <-chan Event) {
 				}
 
 				var nn *fsnode
-				if wd != -1 {
+				if wd >= 0 {
 					nn = watchToNode[wd]
 					if nn != nil {
 						unix.Close(oh) // no longer needed. we already have different handle to this
@@ -475,7 +476,7 @@ func eventProcessor(ch <-chan Event) {
 						papas: []*fsnode{n},
 						size:  -1,
 					}
-					if wd != -1 {
+					if wd >= 0 {
 						watchToNode[wd] = nn
 						scanDir(nn)
 					}
@@ -483,10 +484,10 @@ func eventProcessor(ch <-chan Event) {
 				nn.upd = extractTime(st)
 				n.chlist = append(n.chlist, fsnamed{
 					name:  namesl,
-					lname: []byte(escapeURLPath(string(namesl))),
+					lname: escapeURLPath(namesl),
 					node:  nn,
 				})
-				n.chmap[string(ev.name)] = nn
+				n.chmap[ev.name] = nn
 
 				sortNode(n)
 			} else {
@@ -496,7 +497,7 @@ func eventProcessor(ch <-chan Event) {
 					// normal file
 					if old != nil {
 						// old exists
-						if old.fh != -1 {
+						if old.fh >= 0 {
 							// old was dir. delet
 							delold()
 							// continue adding
@@ -516,10 +517,10 @@ func eventProcessor(ch <-chan Event) {
 					}
 					n.chlist = append(n.chlist, fsnamed{
 						name:  ev.name,
-						lname: []byte(escapeURLPath(string(ev.name))),
+						lname: escapeURLPath(ev.name),
 						node:  nn,
 					})
-					n.chmap[string(ev.name)] = nn
+					n.chmap[ev.name] = nn
 					sortNode(n)
 				} else {
 					fmt.Fprintf(os.Stderr, "dbg: %q is irregular(0x%04X), expunge\n", ev.name, ft)
@@ -532,10 +533,10 @@ func eventProcessor(ch <-chan Event) {
 			return
 		}
 		handledelete := func() {
-			old, ok := n.chmap[string(ev.name)]
+			old, ok := n.chmap[ev.name]
 			if ok {
 				updateNode(n)
-				delete(n.chmap, string(ev.name))
+				delete(n.chmap, ev.name)
 			}
 			if old != nil {
 				for i := range old.papas {
@@ -544,16 +545,16 @@ func eventProcessor(ch <-chan Event) {
 						break // remove only one of them
 					}
 				}
-				var dnam []byte
-				if old.fh == -1 {
+				var dnam string
+				if old.fh < 0 {
 					// what we search for was file
 					dnam = ev.name
 				} else {
 					// what we search for was dir
-					dnam = append(ev.name, '/')
+					dnam = ev.name + "/"
 				}
 				for i := range n.chlist {
-					if bytes.Equal(n.chlist[i].name, dnam) {
+					if n.chlist[i].name == dnam {
 						n.chlist = append(n.chlist[:i], n.chlist[i+1:]...)
 						break
 					}
@@ -565,7 +566,7 @@ func eventProcessor(ch <-chan Event) {
 			// file/dir was moved to
 			fmt.Fprintf(os.Stderr, "dbg: moved to, name %q, dir %t, cookie %q\n",
 				ev.name, dir, ev.raw.Cookie)
-			if hideFilenameSlice(ev.name) {
+			if hideFilename(ev.name) {
 				fmt.Fprintf(os.Stderr, "dbg: moved to hidden. dropping\n")
 				killmovenode()
 				continue
@@ -581,18 +582,18 @@ func eventProcessor(ch <-chan Event) {
 					handledelete()
 					// put it in
 					movenode.papas = append(movenode.papas, n)
-					var nam []byte
-					if movenode.fh == -1 {
+					var nam string
+					if movenode.fh < 0 {
 						nam = ev.name
 					} else {
-						nam = append(ev.name, '/')
+						nam = ev.name + "/"
 					}
 					n.chlist = append(n.chlist, fsnamed{
 						name:  nam,
-						lname: []byte(escapeURLPath(string(nam))),
+						lname: escapeURLPath(nam),
 						node:  movenode,
 					})
-					n.chmap[string(ev.name)] = movenode
+					n.chmap[ev.name] = movenode
 					movenode = nil
 					sortNode(n)
 					updateNode(n)
@@ -640,9 +641,9 @@ func eventProcessor(ch <-chan Event) {
 		if ev.raw.Mask&unix.IN_MOVED_FROM != 0 {
 			// file/dir was moved from
 			fmt.Fprintf(os.Stderr, "dbg: moved from, name(%s), dir(%t), cookie(%d)\n", ev.name, dir, ev.raw.Cookie)
-			old, ok := n.chmap[string(ev.name)]
+			old, ok := n.chmap[ev.name]
 			if ok {
-				delete(n.chmap, string(ev.name))
+				delete(n.chmap, ev.name)
 			}
 			if old != nil {
 				updateNode(n)
@@ -652,16 +653,16 @@ func eventProcessor(ch <-chan Event) {
 						break // remove only one of them
 					}
 				}
-				var dnam []byte
-				if old.fh == -1 {
+				var dnam string
+				if old.fh < 0 {
 					// what we search for was file
 					dnam = ev.name
 				} else {
 					// what we search for was dir
-					dnam = append(ev.name, '/')
+					dnam = ev.name + "/"
 				}
 				for i := range n.chlist {
-					if string(n.chlist[i].name) == string(dnam) {
+					if n.chlist[i].name == dnam {
 						n.chlist = append(n.chlist[:i], n.chlist[i+1:]...)
 						break
 					}
@@ -686,10 +687,10 @@ func killNode(n *fsnode) {
 		return
 	}
 	fmt.Fprintf(os.Stderr, "killing node wd(%d), fh(%d)\n", n.wd, n.fh)
-	if n.wd != -1 {
+	if n.wd >= 0 {
 		unix.InotifyRmWatch(int(gwatcher.ifd), uint32(n.wd))
 	}
-	if n.fh != -1 {
+	if n.fh >= 0 {
 		unix.Close(int(n.fh))
 		n.fh = -1
 	}
@@ -711,14 +712,6 @@ func extractTime(st *unix.Stat_t) time.Time {
 }
 
 func hideFilename(fn string) bool {
-	return fn == "" ||
-		fn == "." ||
-		fn == ".." ||
-		strings.HasPrefix(fn, "._") ||
-		(fn[0] == '.' && !showdot)
-}
-
-func hideFilenameSlice(fn []byte) bool {
 	return len(fn) == 0 ||
 		(fn[0] == '.' &&
 			(!showdot ||
@@ -733,13 +726,13 @@ func scanDir(n *fsnode) {
 
 	var err error
 
-	if n.fh == -1 {
+	if n.fh < 0 {
 		fmt.Fprintf(os.Stderr, "directory file handle is -1, cannot scan\n")
 		return
 	}
 	// reuse its handle to open dir reading handle
 	dh, errno := unix.Openat(int(n.fh), ".", unix.O_RDONLY|unix.O_DIRECTORY, 0)
-	if dh == -1 {
+	if dh < 0 {
 		fmt.Fprintf(os.Stderr, "failed to open dir for listing, err: %v\n", os.NewSyscallError("openat", errno))
 		return
 	}
@@ -767,7 +760,7 @@ func scanDir(n *fsnode) {
 				}
 			}
 			var dnam string
-			if old.fh == -1 {
+			if old.fh < 0 {
 				// what we search for was file
 				dnam = fn
 			} else {
@@ -784,7 +777,7 @@ func scanDir(n *fsnode) {
 		}
 		//fmt.Fprintf(os.Stderr, "dbg: discovered file %q\n", fn)
 		fh, errno := unix.Openat(int(n.fh), fn, unix.O_RDONLY|unix.O_PATH, 0) // follow symlinks
-		if fh == -1 {
+		if fh < 0 {
 			fmt.Fprintf(os.Stderr, "failed to open child dir %q, err: %v\n", fn, os.NewSyscallError("openat", errno))
 			if old != nil {
 				delold()
@@ -806,7 +799,7 @@ func scanDir(n *fsnode) {
 			//fmt.Fprintf(os.Stderr, "%q is regular\n", fn)
 			unix.Close(fh)
 			if old != nil {
-				if old.fh != -1 {
+				if old.fh >= 0 {
 					// old was directory. fugged
 					fmt.Fprintf(os.Stderr, "%q: removing old node which was directory\n", fn)
 					delold()
@@ -827,8 +820,8 @@ func scanDir(n *fsnode) {
 				papas: []*fsnode{n},
 			}
 			n.chlist = append(n.chlist, fsnamed{
-				name:  []byte(fn),
-				lname: []byte(escapeURLPath(fn)),
+				name:  fn,
+				lname: escapeURLPath(fn),
 				node:  nn,
 			})
 			n.chmap[fn] = nn
@@ -836,18 +829,18 @@ func scanDir(n *fsnode) {
 			//fmt.Fprintf(os.Stderr, "%q is directory\n", fn)
 			var wd int32
 			wd, err = addWatch(int32(fh))
-			if wd == -1 {
+			if wd < 0 {
 				fmt.Fprintf(os.Stderr, "failed to watch new %q: %v\n", fn, err)
 			}
 			if old != nil {
-				if old.fh == -1 {
+				if old.fh < 0 {
 					// old was file. fugged
 					fmt.Fprintf(os.Stderr, "%q: removing old node which was file\n", fn)
 					delold()
 					// now continue adding
 				} else {
 					// old was dir aswell.. we should check if it's same dir tho by adding watch
-					if wd != -1 && old.wd == wd {
+					if wd >= 0 && old.wd == wd {
 						fmt.Fprintf(os.Stderr, "%q: old node is same dir, leaving\n", fn)
 						// ok it's same dir. update it. dont add new.
 						old.upd = time.Unix(st.Mtim.Unix()).UTC()
@@ -864,7 +857,7 @@ func scanDir(n *fsnode) {
 			}
 
 			var nn *fsnode
-			if wd != -1 {
+			if wd >= 0 {
 				nn = watchToNode[wd]
 				if nn != nil {
 					unix.Close(fh) // no longer needed. we already have different handle to this
@@ -881,14 +874,14 @@ func scanDir(n *fsnode) {
 					chmap: make(map[string]*fsnode),
 					papas: []*fsnode{n},
 				}
-				if wd != -1 {
+				if wd >= 0 {
 					watchToNode[wd] = nn
 					scanDir(nn)
 				}
 			}
 			n.chlist = append(n.chlist, fsnamed{
-				name:  []byte(namesl),
-				lname: []byte(escapeURLPath(namesl)),
+				name:  namesl,
+				lname: escapeURLPath(namesl),
 				node:  nn,
 			})
 			n.chmap[fn] = nn
@@ -998,7 +991,7 @@ func main() {
 
 	sdir, errno := unix.Open(".", unix.O_RDONLY|unix.O_PATH, 0)
 	startdir = int32(sdir)
-	if sdir == -1 {
+	if sdir < 0 || errno != nil {
 		fmt.Fprintf(os.Stderr, "warning: error opening startup dir: %v\n",
 			os.NewSyscallError("open", errno))
 	}
@@ -1032,7 +1025,7 @@ func main() {
 	go w.watch(feed)
 
 	dh, errno := unix.Open(servedir, unix.O_RDONLY|unix.O_PATH, 0)
-	if dh == -1 {
+	if dh < 0 || errno != nil {
 		fmt.Fprintf(os.Stderr, "error opening watch dir: %v\n",
 			os.NewSyscallError("open", errno))
 		return
