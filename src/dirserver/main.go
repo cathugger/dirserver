@@ -82,7 +82,10 @@ var specialEntries = map[string]specialFunc{
 	"opus": opusHandler,
 }
 
-func processSpecial(w http.ResponseWriter, entry string, node *fsnode, prev, next string) bool {
+func processSpecial(
+	w http.ResponseWriter,
+	entry string, node *fsnode, prev, next string) bool {
+
 	const pfx = "._"
 
 	if !strings.HasPrefix(entry, pfx) {
@@ -133,13 +136,11 @@ func servefolder(w http.ResponseWriter, r *http.Request) {
 
 		ch := cn.chmap[pp[li:is]]
 		if ch == nil {
-			if processSpecial(w, pp[li:is], cn, pp[:li], pp[is:]) {
-				cn.lock.RUnlock()
-				return
-			}
-
 			cn.lock.RUnlock()
-			http.NotFound(w, r)
+
+			if !processSpecial(w, pp[li:is], cn, pp[:li], pp[is:]) {
+				http.NotFound(w, r)
+			}
 			return
 		}
 
@@ -412,8 +413,11 @@ func eventProcessor(ch <-chan Event) {
 			// open handle which can persist
 			const oflags = int(unix.O_RDONLY | unix.O_PATH) // intentionally follow symlinks
 			oh, errno := unix.Openat(int(n.fh), ev.name, oflags, 0)
-			if oh < 0 {
-				fmt.Fprintf(os.Stderr, "ignoring, got error on openat: %v\n", os.NewSyscallError("openat", errno))
+			if oh < 0 || errno != nil {
+				fmt.Fprintf(
+					os.Stderr,
+					"ignoring, got error on openat: %v\n",
+					os.NewSyscallError("openat", errno))
 				if old != nil {
 					delold()
 				}
@@ -424,7 +428,10 @@ func eventProcessor(ch <-chan Event) {
 			errno = unix.Fstatat(oh, "", st, unix.AT_EMPTY_PATH) // intentionally follow symlinks
 			if errno != nil {
 				unix.Close(oh)
-				fmt.Fprintf(os.Stderr, "failed to stat %q: %v\n", ev.name, os.NewSyscallError("fstatat", errno))
+				fmt.Fprintf(
+					os.Stderr,
+					"failed to stat %q: %v\n",
+					ev.name, os.NewSyscallError("fstatat", errno))
 				if old != nil {
 					delold()
 				}
@@ -732,8 +739,11 @@ func scanDir(n *fsnode) {
 	}
 	// reuse its handle to open dir reading handle
 	dh, errno := unix.Openat(int(n.fh), ".", unix.O_RDONLY|unix.O_DIRECTORY, 0)
-	if dh < 0 {
-		fmt.Fprintf(os.Stderr, "failed to open dir for listing, err: %v\n", os.NewSyscallError("openat", errno))
+	if dh < 0 || errno != nil {
+		fmt.Fprintf(
+			os.Stderr,
+			"failed to open dir for listing, err: %v\n",
+			os.NewSyscallError("openat", errno))
 		return
 	}
 	f := os.NewFile(uintptr(dh), "")
@@ -777,8 +787,11 @@ func scanDir(n *fsnode) {
 		}
 		//fmt.Fprintf(os.Stderr, "dbg: discovered file %q\n", fn)
 		fh, errno := unix.Openat(int(n.fh), fn, unix.O_RDONLY|unix.O_PATH, 0) // follow symlinks
-		if fh < 0 {
-			fmt.Fprintf(os.Stderr, "failed to open child dir %q, err: %v\n", fn, os.NewSyscallError("openat", errno))
+		if fh < 0 || errno != nil {
+			fmt.Fprintf(
+				os.Stderr,
+				"failed to open child dir %q, err: %v\n",
+				fn, os.NewSyscallError("openat", errno))
 			if old != nil {
 				delold()
 			}
@@ -992,7 +1005,9 @@ func main() {
 	sdir, errno := unix.Open(".", unix.O_RDONLY|unix.O_PATH, 0)
 	startdir = int32(sdir)
 	if sdir < 0 || errno != nil {
-		fmt.Fprintf(os.Stderr, "warning: error opening startup dir: %v\n",
+		fmt.Fprintf(
+			os.Stderr,
+			"warning: error opening startup dir: %v\n",
 			os.NewSyscallError("open", errno))
 	}
 
