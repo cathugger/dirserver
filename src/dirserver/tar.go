@@ -11,14 +11,14 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func doCompress(twx *tar.Writer, nx *fsnode, dirpfxx string) {
+func tarPack(twx *tar.Writer, nx *fsnode, dirpfxx string) {
 
 	var prevnodes []*fsnode
 	var hdr tar.Header
 
-	var compressDirContents func(tw *tar.Writer, n *fsnode, dirpfx string)
+	var packDirContents func(tw *tar.Writer, n *fsnode, dirpfx string)
 
-	compressDirContents = func(tw *tar.Writer, n *fsnode, dirpfx string) {
+	packDirContents = func(tw *tar.Writer, n *fsnode, dirpfx string) {
 		if n.fh < 0 {
 			panic("not directory")
 		}
@@ -45,8 +45,7 @@ func doCompress(twx *tar.Writer, nx *fsnode, dirpfxx string) {
 		for i := range chlist {
 			nn := chlist[i].node
 			name := chlist[i].name
-
-			hdr = tar.Header{Name: dirpfx + name}
+			fullname := dirpfx + name
 
 			// directory
 			if nn.fh >= 0 {
@@ -57,13 +56,13 @@ func doCompress(twx *tar.Writer, nx *fsnode, dirpfxx string) {
 					}
 				}
 
-				compressDirContents(tw, nn, hdr.Name)
+				packDirContents(tw, nn, fullname)
 
 			loopdetected:
 				continue
 			}
 
-			hdr.Mode = 0644
+			hdr = tar.Header{Name: fullname, Mode: 0644}
 
 			const oflags = int(unix.O_RDONLY)
 			oh, errno := unix.Openat(int(fh), name, oflags, 0)
@@ -89,10 +88,14 @@ func doCompress(twx *tar.Writer, nx *fsnode, dirpfxx string) {
 			hdr.ModTime = extractTime(st)
 			hdr.Size = st.Size
 
-			tw.WriteHeader(&hdr)
+			err := tw.WriteHeader(&hdr)
+			if err != nil {
+				unix.Close(oh)
+				panic("WriteHeader err: " + err.Error())
+			}
 
 			f := os.NewFile(uintptr(oh), "")
-			_, err := io.CopyN(tw, f, st.Size)
+			_, err = io.CopyN(tw, f, st.Size)
 			if err != nil {
 				f.Close()
 				panic("file copying failed: " + err.Error())
@@ -103,7 +106,7 @@ func doCompress(twx *tar.Writer, nx *fsnode, dirpfxx string) {
 		prevnodes = prevnodes[:len(prevnodes)-1] // un-append
 	}
 
-	compressDirContents(twx, nx, dirpfxx)
+	packDirContents(twx, nx, dirpfxx)
 }
 
 func tarHandler(
@@ -135,7 +138,7 @@ func tarHandler(
 	if next != "" {
 		next += "/" // need trailing / to indicate dir
 	}
-	doCompress(tw, node, next)
+	tarPack(tw, node, next)
 
 	tw.Close()
 

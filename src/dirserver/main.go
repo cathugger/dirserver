@@ -124,6 +124,7 @@ func servefolder(w http.ResponseWriter, r *http.Request) {
 	pp := pf
 	cn := rootnode
 	li := len(prefix) - 1
+	lp := li
 
 	cn.lock.RLock()
 	// walk to node we want
@@ -138,12 +139,14 @@ func servefolder(w http.ResponseWriter, r *http.Request) {
 		if ch == nil {
 			cn.lock.RUnlock()
 
+			// special dirs
 			if !processSpecial(w, pp[li+1:is], cn, pp[:li], pp[is:]) {
 				http.NotFound(w, r)
 			}
 			return
 		}
 
+		lp = li
 		li = is
 		cn.lock.RUnlock()
 		cn = ch
@@ -151,6 +154,7 @@ func servefolder(w http.ResponseWriter, r *http.Request) {
 	}
 	defer cn.lock.RUnlock()
 
+	// for special files
 	if processSpecial(w, pp[li+1:], cn, pp[:li], "") {
 		return
 	}
@@ -174,7 +178,8 @@ func servefolder(w http.ResponseWriter, r *http.Request) {
 	 * but that'd be useless without ability to specify multiple
 	 * child templates. and im too lazy for that
 	 */
-	fnx := func(w io.Writer, tag string, n *fsnode) (int, error) {
+	// common
+	fnx := func(w io.Writer, tag string, n *fsnode, lname string) (int, error) {
 		switch tag {
 		case "ud":
 			Y, M, D := n.upd.Date()
@@ -182,14 +187,37 @@ func servefolder(w http.ResponseWriter, r *http.Request) {
 			return fmt.Fprintf(w, "%d-%02d-%02d %02d:%02d:%02d",
 				Y, M, D, h, m, s)
 		case "us":
-			if n.size >= 0 {
+			if n.fh < 0 {
+				// file. files have sizes
 				return fmt.Fprintf(w, "%d", n.size)
+			} else {
+				// directory. insert zip/tar links there
+				if lname != "" {
+					// list
+					anam := lname[:len(lname)-1]
+					return fmt.Fprintf(
+						w,
+						`<a href="%s%s._zip/%s.zip">[zip]</a>`+
+							`<a href="%s%s._tar/%s.tar">[tar]</a>`,
+						pf, lname, anam,
+						pf, lname, anam)
+				} else {
+					// head/tail
+					anam := pf[lp+1 : li]
+					return fmt.Fprintf(
+						w,
+						`<a href="%s._zip/%s.zip>[zip]</a>`+
+							`<a href="%s._tar/%s.tar>[tar]</a>`,
+						pf, anam,
+						pf, anam)
+				}
 			}
 		default:
 			panic("unknown tag type")
 		}
 		return 0, nil
 	}
+	// for each file
 	fnn := func(w io.Writer, tag string, nam fsnamed) (int, error) {
 		chname := unsafeStrToBytes(nam.name)
 		chlname := unsafeStrToBytes(nam.lname)
@@ -203,10 +231,11 @@ func servefolder(w http.ResponseWriter, r *http.Request) {
 		case "jn":
 			template.JSEscape(w, chname)
 		default:
-			return fnx(w, tag, nam.node)
+			return fnx(w, tag, nam.node, nam.lname)
 		}
 		return 0, nil
 	}
+	// header and footer
 	fg := func(w io.Writer, tag string) (int, error) {
 		switch tag {
 		case "uf":
@@ -218,7 +247,7 @@ func servefolder(w http.ResponseWriter, r *http.Request) {
 		case "jf":
 			template.JSEscape(w, unsafeStrToBytes(pf))
 		default:
-			return fnx(w, tag, cn)
+			return fnx(w, tag, cn, "")
 		}
 		return 0, nil
 	}
