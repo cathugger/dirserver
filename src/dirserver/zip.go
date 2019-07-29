@@ -49,7 +49,7 @@ func zipCompress(twx *zip.Writer, nx *fsnode, dirpfxx string) {
 			if nn.fh >= 0 {
 				// check for loop
 				for _, pn := range prevnodes {
-					if pn == n {
+					if pn == nn {
 						goto loopdetected
 					}
 				}
