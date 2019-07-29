@@ -201,7 +201,7 @@ func servefolder(w http.ResponseWriter, r *http.Request) {
 							`[<a href="%s%s._tar/%s.tar" download="">tar</a>]`,
 						pf, lname, anam,
 						pf, lname, anam)
-				} else {
+				} else if lp < li {
 					// head/tail
 					anam := pf[lp+1 : li]
 					return fmt.Fprintf(
