@@ -206,8 +206,8 @@ func servefolder(w http.ResponseWriter, r *http.Request) {
 					anam := pf[lp+1 : li]
 					return fmt.Fprintf(
 						w,
-						`[<a href="%s._zip/%s.zip>zip</a>]`+
-							`[<a href="%s._tar/%s.tar>tar</a>]`,
+						`[<a href="%s._zip/%s.zip">zip</a>]`+
+							`[<a href="%s._tar/%s.tar">tar</a>]`,
 						pf, anam,
 						pf, anam)
 				}
