@@ -303,34 +303,45 @@ var watchToNode = make(map[int32]*fsnode)
 var collNoCase = collate.New(language.Und, collate.IgnoreCase)
 var collCase = collate.New(language.Und)
 
+func stripSlashIfDir(str string, isdir bool) string {
+	if isdir {
+		return str[:len(str)-1]
+	} else {
+		return str
+	}
+}
+
 func sortNode(n *fsnode) {
 	cl := n.chlist
 	sort.Slice(cl, func(i, j int) bool {
 		// sort dirs first
-		d1 := cl[i].node.fh >= 0
-		d2 := cl[j].node.fh >= 0
-		if d1 && !d2 {
+		id := cl[i].node.fh >= 0
+		jd := cl[j].node.fh >= 0
+		if id && !jd {
 			return true
 		}
-		if !d1 && d2 {
+		if !id && jd {
 			return false
 		}
 
-		res := collNoCase.CompareString(cl[i].name, cl[j].name)
+		iname := stripSlashIfDir(cl[i].name, id)
+		jname := stripSlashIfDir(cl[j].name, jd)
+
+		res := collNoCase.CompareString(iname, jname)
 		if res < 0 {
 			return true
 		}
 		if res > 0 {
 			return false
 		}
-		res = collCase.CompareString(cl[i].name, cl[j].name)
+		res = collCase.CompareString(iname, jname)
 		if res < 0 {
 			return true
 		}
 		if res > 0 {
 			return false
 		}
-		return cl[i].name < cl[j].name
+		return iname < jname
 	})
 }
 
